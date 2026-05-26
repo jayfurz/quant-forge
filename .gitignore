@@ -1,0 +1,42 @@
+# Build
+build/
+cmake-build-*/
+*.o
+*.a
+*.so
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+dist/
+*.egg-info/
+
+# Data
+data/raw/*
+data/clean/*
+data/market_data/*
+!data/raw/.gitkeep
+!data/clean/.gitkeep
+!data/market_data/.gitkeep
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config (local)
+configs/local*.json
+
+# Cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

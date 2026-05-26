@@ -1,0 +1,14 @@
+{
+  "symbols": ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK.B"],
+  "start_date": "2023-01-01",
+  "end_date": "2025-12-31",
+  "data_dir": "../data/clean",
+  "initial_capital": 100000.0,
+  "commission_per_share": 0.005,
+  "min_commission": 1.0,
+  "slippage_bps": 2.0,
+  "bar_size": "1d",
+  "shorting_enabled": false,
+  "margin_rate": 0.30,
+  "risk_free_rate": 0.05
+}
