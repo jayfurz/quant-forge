@@ -39,18 +39,20 @@ def to_simulation_format(df: pl.DataFrame, symbol: str) -> pl.DataFrame:
     return out
 
 
-def export_csv(df: pl.DataFrame, path: Path) -> None:
+def export_csv(df: pl.DataFrame, path: Path | str) -> None:
     """Export to CSV with QuantForge schema."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.write_csv(path)
-    logger.info("Exported %d rows to %s", df.height, path)
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    df.write_csv(p)
+    logger.info("Exported %d rows to %s", df.height, p)
 
 
-def export_parquet(df: pl.DataFrame, path: Path) -> None:
+def export_parquet(df: pl.DataFrame, path: Path | str) -> None:
     """Export to Parquet (faster to load, preserves types)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.write_parquet(path, compression="zstd")
-    logger.info("Exported %d rows to %s", df.height, path)
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(p, compression="zstd")
+    logger.info("Exported %d rows to %s", df.height, p)
 
 
 def prepare_universe(

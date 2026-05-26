@@ -54,9 +54,9 @@ TEST_CASE("RSI basic") {
 
     auto val = rsi.current();
     CHECK(val.has_value());
-    // avg_gain = (2+3+2+5)/4 = 3.0, avg_loss = (0+0+2+0)/4 = 0.5
-    // rs = 6.0, rsi = 100 - 100/(1+6) = 85.71
-    CHECK(val.value() == doctest::Approx(85.71).epsilon(0.01));
+    // avg_gain = (2+3+0+5)/4 = 2.5, avg_loss = (0+0+2+0)/4 = 0.5
+    // rs = 5.0, rsi = 100 - 100/(1+5) = 83.33
+    CHECK(val.value() == doctest::Approx(83.33).epsilon(0.01));
 }
 
 TEST_CASE("Bollinger Bands") {

@@ -108,4 +108,10 @@ private:
     bool metrics_dirty_ = true;
 };
 
+// Free function: fill simulation for limit/stop orders (in fill_model.cpp)
+std::vector<Fill> simulate_fills(
+    const std::vector<Order>& orders,
+    const Bar& bar,
+    const SimulationConfig& config);
+
 } // namespace qf

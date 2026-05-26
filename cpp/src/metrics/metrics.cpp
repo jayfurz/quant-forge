@@ -3,6 +3,7 @@
 #include <cmath>
 #include <algorithm>
 #include <numeric>
+#include <unordered_map>
 
 namespace qf::metrics {
 
@@ -12,7 +13,7 @@ struct DailyReturn {
 };
 
 // Helper: compute daily returns from equity curve
-inline std::vector<DailyReturn> daily_returns(
+std::vector<DailyReturn> daily_returns(
     const std::vector<std::pair<Timestamp, double>>& equity_curve)
 {
     if (equity_curve.size() < 2) return {};
@@ -36,7 +37,7 @@ inline std::vector<DailyReturn> daily_returns(
 }
 
 // ── Sharpe Ratio ────────────────────────────────────────────────
-inline double sharpe_ratio(const std::vector<std::pair<Timestamp, double>>& equity_curve, double risk_free_rate = 0.0) {
+double sharpe_ratio(const std::vector<std::pair<Timestamp, double>>& equity_curve, double risk_free_rate = 0.0) {
     auto rets = daily_returns(equity_curve);
     if (rets.size() < 2) return 0.0;
 
@@ -61,7 +62,7 @@ inline double sharpe_ratio(const std::vector<std::pair<Timestamp, double>>& equi
 }
 
 // ── Sortino Ratio ───────────────────────────────────────────────
-inline double sortino_ratio(const std::vector<std::pair<Timestamp, double>>& equity_curve, double risk_free_rate = 0.0) {
+double sortino_ratio(const std::vector<std::pair<Timestamp, double>>& equity_curve, double risk_free_rate = 0.0) {
     auto rets = daily_returns(equity_curve);
     if (rets.size() < 2) return 0.0;
 
@@ -91,7 +92,7 @@ inline double sortino_ratio(const std::vector<std::pair<Timestamp, double>>& equ
 }
 
 // ── Max Drawdown ────────────────────────────────────────────────
-inline double max_drawdown_pct(const std::vector<std::pair<Timestamp, double>>& equity_curve) {
+double max_drawdown_pct(const std::vector<std::pair<Timestamp, double>>& equity_curve) {
     if (equity_curve.empty()) return 0.0;
 
     double peak = equity_curve[0].second;
@@ -106,7 +107,7 @@ inline double max_drawdown_pct(const std::vector<std::pair<Timestamp, double>>& 
 }
 
 // ── Win Rate ────────────────────────────────────────────────────
-inline double win_rate(const std::vector<Fill>& fills) {
+double win_rate(const std::vector<Fill>& fills) {
     if (fills.empty()) return 0.0;
 
     int wins = 0;
@@ -132,7 +133,7 @@ inline double win_rate(const std::vector<Fill>& fills) {
 }
 
 // ── Profit Factor ───────────────────────────────────────────────
-inline double profit_factor(const std::vector<Fill>& fills) {
+double profit_factor(const std::vector<Fill>& fills) {
     double gross_profit = 0.0;
     double gross_loss = 0.0;
 
@@ -149,7 +150,7 @@ inline double profit_factor(const std::vector<Fill>& fills) {
 }
 
 // ── Calmar Ratio ────────────────────────────────────────────────
-inline double calmar_ratio(
+double calmar_ratio(
     double annualized_return_pct,
     const std::vector<std::pair<Timestamp, double>>& equity_curve)
 {
@@ -159,7 +160,7 @@ inline double calmar_ratio(
 }
 
 // ── Portfolio-level daily volatility ────────────────────────────
-inline double daily_volatility_pct(
+double daily_volatility_pct(
     const std::vector<std::pair<Timestamp, double>>& equity_curve)
 {
     auto rets = daily_returns(equity_curve);
@@ -179,7 +180,7 @@ inline double daily_volatility_pct(
 }
 
 // ── Annualized Return ──────────────────────────────────────────
-inline double annualized_return_pct(
+double annualized_return_pct(
     double total_return_pct, Timestamp start_ts, Timestamp end_ts)
 {
     if (end_ts <= start_ts) return 0.0;
@@ -190,7 +191,7 @@ inline double annualized_return_pct(
 }
 
 // ── Full metrics computation ────────────────────────────────────
-inline SimulationMetrics compute_all(
+SimulationMetrics compute_all(
     const std::vector<std::pair<Timestamp, double>>& equity_curve,
     const std::vector<Fill>& fills,
     double initial_capital,

@@ -36,6 +36,9 @@ Thumbs.db
 # Config (local)
 configs/local*.json
 
+# Secrets
+.env
+
 # Cache
 .pytest_cache/
 .mypy_cache/

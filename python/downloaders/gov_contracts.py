@@ -1,9 +1,8 @@
 """
-Federal procurement data — SAM.gov / FPDS contract awards.
+Federal procurement data — SAM.gov / USASpending.gov contract awards.
 Free, public, no API key for basic search.
 
-Use case: track defense/AI contract award velocity by company,
-supplier network analysis, subcontractor activity.
+Fixed for current API field names (UEI instead of DUNS, Start Date instead of PoP Start Date).
 """
 
 import logging
@@ -17,45 +16,36 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# SAM.gov API (free, requires account for API key, but public search works)
-SAM_API = "https://api.sam.gov/opportunities/v2/search"
-# USASpending.gov API (free, no key required for basic access)
 USA_SPENDING = "https://api.usaspending.gov/api/v2"
-
 HEADERS = {
-    "User-Agent": "QuantForge/0.1 (justin0106@protonmail.com)"
+    "User-Agent": "QuantForge/0.1 (justin0106@protonmail.com)",
+    "Content-Type": "application/json",
 }
 
 
 def search_contracts(
     keywords: list[str],
     date_range: tuple[str, str] = ("2024-01-01", "2025-12-31"),
-    limit: int = 1000
+    limit: int = 500
 ) -> pl.DataFrame:
-    """
-    Search federal contracts by keyword using USASpending API.
-
-    Example keywords: ["artificial intelligence", "GPU", "CUDA", "missile", "radar"]
-    Returns: contract awards with vendor, value, agency, dates
-    """
+    """Search federal contracts by keyword using USASpending API."""
 
     all_results = []
 
     for keyword in keywords:
         url = f"{USA_SPENDING}/search/spending_by_award/"
-
         payload = {
             "filters": {
                 "keywords": [keyword],
                 "time_period": [
                     {"start_date": date_range[0], "end_date": date_range[1]}
                 ],
-                "award_type_codes": ["A", "B", "C", "D"],  # Contracts only
+                "award_type_codes": ["A", "B", "C", "D"],
             },
             "fields": [
                 "Award ID", "Awarding Agency", "Awarding Sub Agency",
-                "Recipient Name", "Recipient DUNS", "Description",
-                "Period of Performance Start Date", "Period of Performance Current End Date",
+                "Recipient Name", "Recipient UEI", "Description",
+                "Start Date", "End Date",
                 "Award Amount", "Potential Award Value",
             ],
             "limit": limit,
@@ -75,53 +65,45 @@ def search_contracts(
                     "agency": award.get("Awarding Agency", ""),
                     "sub_agency": award.get("Awarding Sub Agency", ""),
                     "vendor_name": award.get("Recipient Name", ""),
-                    "vendor_duns": award.get("Recipient DUNS", ""),
+                    "vendor_uei": award.get("Recipient UEI", ""),
                     "description": award.get("Description", ""),
-                    "start_date": award.get("Period of Performance Start Date"),
-                    "end_date": award.get("Period of Performance Current End Date"),
-                    "award_amount": award.get("Award Amount"),
-                    "potential_value": award.get("Potential Award Value"),
+                    "start_date": award.get("Start Date"),
+                    "end_date": award.get("End Date"),
+                    "award_amount": float(award.get("Award Amount", 0) or 0),
+                    "potential_value": float(award.get("Potential Award Value", 0) or 0),
                     "keyword": keyword,
                 })
 
         except Exception as e:
             logger.error("Contract search failed for '%s': %s", keyword, e)
 
-        time.sleep(0.6)  # Rate limiting
+        time.sleep(0.6)
 
     if not all_results:
         return pl.DataFrame()
 
-    df = pl.DataFrame(all_results)
-    return df.sort("award_amount", descending=True)
+    return pl.DataFrame(all_results).sort("award_amount", descending=True)
 
 
-def fetch_defense_contracts_by_vendor(
+def fetch_defense_contracts(
     vendor_names: list[str],
     start_date: str = "2023-01-01",
     end_date: str = "2025-12-31"
 ) -> pl.DataFrame:
     """
-    Fetch DoD/Federal contracts for specific defense vendors.
+    Fetch federal contracts for specific defense vendors via keyword search.
 
-    Common tickers → vendor name mapping:
-    LMT → Lockheed Martin
-    RTX → Raytheon Technologies
-    NOC → Northrop Grumman
-    GD  → General Dynamics
-    BA  → Boeing
-    LHX → L3Harris
-    HII → Huntington Ingalls
+    Ticker → vendor name:
+      LMT → Lockheed Martin, RTX → Raytheon, NOC → Northrop Grumman,
+      GD → General Dynamics, BA → Boeing, LHX → L3Harris, HII → Huntington Ingalls
     """
-
     url = f"{USA_SPENDING}/search/spending_by_award/"
-
     all_results = []
 
     for vendor in vendor_names:
         payload = {
             "filters": {
-                "recipient_search_text": [vendor],
+                "keywords": [vendor],
                 "time_period": [
                     {"start_date": start_date, "end_date": end_date}
                 ],
@@ -130,11 +112,11 @@ def fetch_defense_contracts_by_vendor(
             "fields": [
                 "Award ID", "Awarding Agency", "Awarding Sub Agency",
                 "Recipient Name", "Description",
-                "Period of Performance Start Date",
+                "Start Date", "End Date",
                 "Award Amount", "Potential Award Value",
-                "Naics Description", "PSC Description",
+                "NAICS Description", "Product Service Code (PSC) Description",
             ],
-            "limit": 500,
+            "limit": 100,
             "page": 1,
             "sort": "Award Amount",
             "order": "desc"
@@ -151,11 +133,12 @@ def fetch_defense_contracts_by_vendor(
                     "award_id": award.get("Award ID"),
                     "agency": award.get("Awarding Agency"),
                     "description": award.get("Description"),
-                    "amount": award.get("Award Amount", 0) or 0,
-                    "potential_value": award.get("Potential Award Value", 0) or 0,
-                    "start_date": award.get("Period of Performance Start Date"),
-                    "naics": award.get("Naics Description"),
-                    "psc": award.get("PSC Description"),
+                    "amount": float(award.get("Award Amount", 0) or 0),
+                    "potential_value": float(award.get("Potential Award Value", 0) or 0),
+                    "start_date": award.get("Start Date"),
+                    "end_date": award.get("End Date"),
+                    "naics": award.get("NAICS Description"),
+                    "psc": award.get("Product Service Code (PSC) Description"),
                 })
 
         except Exception as e:
@@ -166,30 +149,22 @@ def fetch_defense_contracts_by_vendor(
     return pl.DataFrame(all_results)
 
 
+# Backwards compat alias
+fetch_defense_contracts_by_vendor = fetch_defense_contracts
+
+
 def contract_award_velocity(
     df: pl.DataFrame,
     group_by: str = "vendor",
     window_days: int = 90
 ) -> pl.DataFrame:
-    """
-    Compute rolling contract award velocity.
+    """Compute rolling contract award velocity per vendor."""
 
-    For each vendor, compute:
-    - Total awarded in last N days
-    - Number of new awards in last N days
-    - Average award size
-    - YoY growth rate
-    """
-    if df.is_empty():
+    if df.is_empty() or "start_date" not in df.columns:
         return df
 
-    # Ensure datetime
     df = df.with_columns(pl.col("start_date").cast(pl.Date))
-
-    # Group by vendor and quarter
-    df = df.with_columns(
-        pl.col("start_date").dt.truncate("1mo").alias("month")
-    )
+    df = df.with_columns(pl.col("start_date").dt.truncate("1mo").alias("month"))
 
     velocity = df.group_by(["vendor", "month"]).agg([
         pl.col("amount").sum().alias("monthly_awards"),
@@ -197,7 +172,6 @@ def contract_award_velocity(
         pl.col("amount").mean().alias("avg_award_size"),
     ]).sort(["vendor", "month"])
 
-    # Rolling 3-month total
     velocity = velocity.with_columns(
         pl.col("monthly_awards")
           .rolling_sum(window_size=3, min_periods=1)
@@ -210,43 +184,3 @@ def contract_award_velocity(
     )
 
     return velocity
-
-
-# ── Agency spending trends ────────────────────────────────────────
-def agency_spending_trends(
-    agencies: list[str] = None
-) -> pl.DataFrame:
-    """
-    Get agency-level spending profiles.
-    Defaults to defense-related agencies.
-    """
-    if agencies is None:
-        agencies = [
-            "Department of Defense",
-            "Department of the Air Force",
-            "Department of the Navy",
-            "Department of the Army",
-            "Defense Advanced Research Projects Agency",
-            "Missile Defense Agency",
-            "Space Development Agency",
-            "National Aeronautics and Space Administration",
-        ]
-
-    url = f"{USA_SPENDING}/api/v2/agency/{agencies[0]}/obligations_by_award_category/"
-
-    results = []
-    for agency in agencies:
-        try:
-            resp = requests.get(url, headers=HEADERS, timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                for cat in data.get("results", []):
-                    results.append({
-                        "agency": agency,
-                        "category": cat.get("category", ""),
-                        "obligated_amount": cat.get("aggregated_amount", 0)
-                    })
-        except Exception as e:
-            logger.error("Agency lookup failed for %s: %s", agency, e)
-
-    return pl.DataFrame(results)

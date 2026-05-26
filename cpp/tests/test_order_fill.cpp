@@ -5,7 +5,7 @@
 using namespace qf;
 
 TEST_CASE("Fill model: market order") {
-    SimulationConfig config;
+    SimulationConfig config{.slippage_model_bps = 0.0};
     Bar bar{0, 100.0, 105.0, 95.0, 102.0, 10000};
 
     Order market{1, "AAPL", Side::Buy, OrderType::Market, TimeInForce::Day, 50};

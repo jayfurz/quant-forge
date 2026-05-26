@@ -16,7 +16,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-SEC_BASE = "https://www.sec.gov"
+SEC_BASE = "https://data.sec.gov"
 HEADERS = {
     "User-Agent": "QuantForge/0.1 (justin0106@protonmail.com)",
     "Accept-Encoding": "gzip, deflate"

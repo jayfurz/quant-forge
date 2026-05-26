@@ -29,7 +29,9 @@ HEADERS = {
 # ── USAJobs API (free, no key required) ───────────────────────────
 def fetch_usajobs(
     keywords: list[str],
-    max_results: int = 500
+    max_results: int = 500,
+    api_key: str = "",
+    email: str = "",
 ) -> pl.DataFrame:
     """
     Search federal job postings for defense/AI/engineering roles.
@@ -50,11 +52,15 @@ def fetch_usajobs(
         }
 
         try:
-            resp = requests.get(url, params=params, headers={
+            req_headers = {
                 **HEADERS,
                 "Host": "data.usajobs.gov",
-                "User-Agent": "QuantForge/0.1 (justin0106@protonmail.com)"
-            }, timeout=15)
+                "User-Agent": email or "QuantForge/0.1 (justin0106@protonmail.com)",
+            }
+            if api_key:
+                req_headers["Authorization-Key"] = api_key
+
+            resp = requests.get(url, params=params, headers=req_headers, timeout=15)
             resp.raise_for_status()
             data = resp.json()
 
@@ -87,7 +93,8 @@ def fetch_usajobs(
         return pl.DataFrame()
 
     df = pl.DataFrame(all_results)
-    df = df.with_columns(pl.col("post_date").cast(pl.Date))
+    # USAJobs returns ISO timestamps like "2026-05-26T00:00:00.0000"
+    df = df.with_columns(pl.col("post_date").str.strptime(pl.Date, "%Y-%m-%dT%H:%M:%S%.f"))
     return df.sort("post_date", descending=True)
 
 
