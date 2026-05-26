@@ -1,0 +1,2 @@
+order_id,symbol,side,price,quantity,timestamp,commission,slippage_bps
+1,AAPL,Buy,101.01,100,1704153600000000000,1,1

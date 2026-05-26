@@ -1,3 +1,5 @@
+#pragma once
+
 #include "quant_forge/types.hpp"
 #include <unordered_map>
 #include <vector>
@@ -113,5 +115,10 @@ std::vector<Fill> simulate_fills(
     const std::vector<Order>& orders,
     const Bar& bar,
     const SimulationConfig& config);
+
+// Free function: parse a multi-symbol bars CSV file
+// Returns map of symbol → sorted bars. Throws on validation failure.
+// Expected columns: symbol,timestamp,open,high,low,close,volume
+std::unordered_map<std::string, std::vector<Bar>> parse_bars_csv(const std::string& path);
 
 } // namespace qf

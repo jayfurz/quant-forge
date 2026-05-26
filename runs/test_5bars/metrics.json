@@ -1,0 +1,15 @@
+{
+  "total_return_pct": 0.44799,
+  "annualized_return_pct": 31.248,
+  "sharpe_ratio": 18.5317,
+  "sortino_ratio": 0,
+  "max_drawdown_pct": 0,
+  "win_rate_pct": 0,
+  "profit_factor": 0,
+  "avg_trade_pnl": 0.44799,
+  "total_trades": 1,
+  "winning_trades": 0,
+  "losing_trades": 1,
+  "calmar_ratio": 0,
+  "daily_volatility_pct": 0.0637576
+}

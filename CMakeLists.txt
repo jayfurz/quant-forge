@@ -25,6 +25,7 @@ add_library(quant_forge_core STATIC
     cpp/src/indicators/indicators.cpp
     cpp/src/orders/fill_model.cpp
     cpp/src/metrics/metrics.cpp
+    cpp/src/strategies/momentum_ema_hysteresis.cpp
 )
 target_include_directories(quant_forge_core PUBLIC cpp/include)
 target_link_libraries(quant_forge_core PUBLIC fmt::fmt nlohmann_json::nlohmann_json SQLite3::SQLite3)
@@ -49,6 +50,7 @@ add_executable(qf-tests
     cpp/tests/test_portfolio.cpp
     cpp/tests/test_order_fill.cpp
     cpp/tests/test_metrics.cpp
+    cpp/tests/test_csv_loader.cpp
 )
 target_link_libraries(qf-tests PRIVATE quant_forge_core doctest)
 add_test(NAME qf-tests COMMAND qf-tests)

@@ -1,16 +1,19 @@
 """
-FINRA OTC Transparency Data API.
+FINRA OTC Transparency Data.
 
-FINRA's developer portal: https://developer.finra.org
-OTC data includes: weekly summaries, trade volumes, market maker counts.
-Data is public and free but may require registration for API access.
+Status: KEY REGISTERED but API landscape changed.
+The key 4579b5… returns 403 (recognized, access denied) — FINRA now requires:
+  1. FINRA member firm affiliation
+  2. API Console entitlement via FINRA Gateway
+  3. Machine-to-machine credential provisioning by a SAA
 
-Current endpoints need to be confirmed against the FINRA Developer Center docs.
-The weekly summary CSV downloads are available at:
-  https://otctransparency.finra.org/otctransparency/AgAWeeklyDownload
+Fallback options:
+  - Public CSV download (CloudFront-blocked for non-browser agents)
+  - Browser-based download with user-agent spoofing
+  - Manual download from https://otctransparency.finra.org
 
-This module uses the OTC Transparency public download CSV as the primary source
-(with the API endpoint as fallback).
+For now: mark as ⚠️ NEEDS REGISTRATION — the key exists but the API platform
+requires firm-level onboarding.
 """
 
 import logging
