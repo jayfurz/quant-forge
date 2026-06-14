@@ -227,6 +227,68 @@ def fetch_monthly_obligations_by_vendor(
     return pl.DataFrame(rows).sort(["vendor", "month"])
 
 
+def fetch_large_awards_by_vendor(
+    vendor_names: list[str],
+    start_date: str = "2015-01-01",
+    end_date: str = "2025-12-31",
+    top_n: int = 150,
+    page_size: int = 100,
+) -> pl.DataFrame:
+    """
+    Fetch each vendor's largest obligation *transactions* (sorted by Transaction
+    Amount desc) — the natural "large contract award" events for an event study,
+    each carrying a real ``action_date`` (not the PoP-start trap).
+
+    Returns columns: vendor, award_id, amount, action_date.
+    """
+    url = f"{USA_SPENDING}/search/spending_by_transaction/"
+    rows = []
+    for vendor in vendor_names:
+        fetched = 0
+        for page in range(1, (top_n // page_size) + 2):
+            payload = {
+                "filters": {
+                    "keywords": [vendor],
+                    "time_period": [{"start_date": start_date, "end_date": end_date}],
+                    "award_type_codes": ["A", "B", "C", "D"],
+                },
+                "fields": ["Transaction Amount", "Action Date", "Award ID", "Recipient Name"],
+                "limit": page_size,
+                "page": page,
+                "sort": "Transaction Amount",
+                "order": "desc",
+            }
+            try:
+                resp = requests.post(url, json=payload, headers=HEADERS, timeout=30)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                logger.error("Large-award fetch failed for '%s' (page %d): %s",
+                             vendor, page, e)
+                break
+            for tx in data.get("results", []):
+                try:
+                    amount = float(tx.get("Transaction Amount", 0) or 0)
+                except (ValueError, TypeError):
+                    amount = 0.0
+                rows.append({
+                    "vendor": vendor,
+                    "award_id": tx.get("Award ID", ""),
+                    "amount": amount,
+                    "action_date": tx.get("Action Date"),
+                })
+                fetched += 1
+            if fetched >= top_n or not data.get("page_metadata", {}).get("hasNext"):
+                break
+            time.sleep(0.25)
+        logger.info("  %s: %d large awards", vendor, fetched)
+        time.sleep(0.4)
+
+    if not rows:
+        return pl.DataFrame()
+    return pl.DataFrame(rows).sort(["vendor", "amount"], descending=[False, True])
+
+
 def _yearly_windows(start_date: str, end_date: str) -> list[tuple[str, str]]:
     """Split [start, end] into ≤1-year sub-windows (inclusive)."""
     start = datetime.strptime(start_date, "%Y-%m-%d").date()

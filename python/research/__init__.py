@@ -17,6 +17,7 @@ from .features import (
 from .pit_joiner import PointInTimeJoiner
 from .forward_returns import ForwardReturnLabeler
 from .regression import fama_macbeth
+from .event_study import EventStudy
 from .study_runner import SignalStudyRunner
 
 __all__ = [
@@ -28,4 +29,5 @@ __all__ = [
     "build_trailing_obligations",
     "trailing_zscore",
     "fama_macbeth",
+    "EventStudy",
 ]

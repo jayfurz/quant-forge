@@ -1,3 +1,42 @@
+# Research Notes — Contract Award Velocity (v5: + event study)
+
+## v5 headline — event study around large awards (read this first)
+
+The factor work asked "does contract data *rank* stocks?" (no). The event study
+asks the more natural question: "does a stock *react* to a large award
+announcement?" Engine: `research.EventStudy` — cumulative abnormal return
+(CAR = stock − ITA) over [−5,+60] trading days around each award's action date,
+t-stats across events, split by award size. Driver:
+`studies/contract_award_events.py`. Events = each vendor's largest obligation
+transactions (≥ $50M), de-duplicated into clusters.
+
+- **First-pass result looked real and negative:** over 1,010 large awards, the
+  60-day post-event CAR was **−0.93%, t = −2.37** — a "sell-the-news"
+  underperformance, concentrated in mid/large awards. No announcement-day pop
+  (t = −0.58) and no run-up (t = +0.30).
+- **It did not survive a robustness check.** Those 1,010 events have 60-day
+  windows that overlap massively (multiple awards per name, fiscal-year-end
+  clustering), so the independence the t-stat assumes is badly violated.
+  Re-running with events spaced ≥90 days apart (297 near-independent events)
+  **collapses the effect to −0.22%, t = −0.27.** The −2.37 was an
+  overlapping-window artifact, not alpha. (A marginal +0.42% / t=1.86 over
+  [1,5] appears in the clean sample but is <2 and sign-flips vs the full sample
+  → noise.)
+
+**Verdict:** no robust abnormal return around large defense awards — consistent
+with the factor study. Awards appear anticipated / priced in. And once again the
+honest answer only emerged after correcting for overlap (cf. the v3 momentum
+non-replication). Reports in `reports/contract_award_events/` (full) and
+`…_events_robust/` (90-day-spaced).
+
+```bash
+python studies/contract_award_events.py --years 8 --min-award 50e6                 # full
+python studies/contract_award_events.py --years 8 --min-award 50e6 --cluster-days 90 \
+    --out reports/contract_award_events_robust                                      # robust
+```
+
+---
+
 # Research Notes — Contract Award Velocity (v4: orthogonalized + size)
 
 **Date:** 2026-06-14
