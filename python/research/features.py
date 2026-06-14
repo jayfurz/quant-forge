@@ -170,6 +170,71 @@ def build_award_velocity(
     ])
 
 
+def build_fundamental_momentum(
+    revenue: pl.DataFrame,
+    feature_growth: str = "rev_yoy_growth",
+    feature_accel: str = "rev_yoy_accel",
+) -> pl.DataFrame:
+    """
+    Build point-in-time revenue-momentum features from raw XBRL revenue rows
+    (output of downloaders.sec_edgar.fetch_revenue_quarterly).
+
+    Method (PIT-safe):
+      * keep ~quarterly periods (80–100 day duration) — 10-K annual durations
+        and YTD rows are dropped to keep a clean per-quarter series.
+      * dedupe each (symbol, end) to the FIRST filing of that period value (a
+        later restatement must not overwrite what was known at the time).
+      * within each (symbol, fiscal-period) compute year-over-year growth
+        (vs the same fiscal quarter a year earlier) and its acceleration
+        (change in YoY growth) — the classic fundamental-momentum signals.
+      * ts_available = filed date.
+
+    Returns two stacked features (growth, accel) in the FeatureStore schema.
+    """
+    if revenue.is_empty():
+        return pl.DataFrame()
+
+    df = revenue.with_columns([
+        pl.col("start").str.strptime(pl.Date, strict=False),
+        pl.col("end").str.strptime(pl.Date, strict=False),
+        pl.col("filed").str.strptime(pl.Date, strict=False),
+    ]).drop_nulls(subset=["start", "end", "filed", "val", "fp"])
+
+    dur = (pl.col("end") - pl.col("start")).dt.total_days()
+    df = df.filter((dur >= 80) & (dur <= 100) & (pl.col("val") > 0))
+    if df.is_empty():
+        return pl.DataFrame()
+
+    # First filing of each period value (PIT — ignore later restatements).
+    df = df.sort(["symbol", "end", "filed"]).unique(
+        subset=["symbol", "end"], keep="first")
+
+    # YoY growth & acceleration within each (symbol, fiscal period).
+    df = df.sort(["symbol", "fp", "end"]).with_columns(
+        (pl.col("val") / pl.col("val").shift(1).over(["symbol", "fp"]) - 1.0)
+        .alias("_yoy")
+    ).with_columns(
+        (pl.col("_yoy") - pl.col("_yoy").shift(1).over(["symbol", "fp"])).alias("_accel")
+    )
+
+    def _emit(value_col: str, name: str) -> pl.DataFrame:
+        return df.drop_nulls(subset=[value_col]).select([
+            pl.col("symbol"),
+            pl.col("filed").cast(pl.Datetime("us")).alias("ts_available"),
+            pl.lit(name).alias("feature_name"),
+            (pl.col(value_col) * 100.0).alias("feature_value"),  # percent
+            pl.lit("sec_xbrl").alias("source"),
+            pl.col("end").cast(pl.Utf8).alias("source_event_id"),
+            pl.col("end").cast(pl.Datetime("us")).alias("asof_date"),
+        ])
+
+    parts = [_emit("_yoy", feature_growth), _emit("_accel", feature_accel)]
+    parts = [p for p in parts if not p.is_empty()]
+    if not parts:
+        return pl.DataFrame()
+    return pl.concat(parts, how="diagonal_relaxed")
+
+
 def build_trailing_obligations(
     obligations: pl.DataFrame,
     window_days: int = 365,

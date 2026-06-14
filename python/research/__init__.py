@@ -11,6 +11,7 @@ Point-in-time signal research infrastructure:
 from .feature_store import FeatureStore
 from .features import (
     build_award_velocity,
+    build_fundamental_momentum,
     build_trailing_obligations,
     trailing_zscore,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "ForwardReturnLabeler",
     "SignalStudyRunner",
     "build_award_velocity",
+    "build_fundamental_momentum",
     "build_trailing_obligations",
     "trailing_zscore",
     "fama_macbeth",
