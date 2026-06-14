@@ -44,3 +44,38 @@ the revenue-growth surprise**, split by surprise sign — reusing
 `research.EventStudy` exactly as in the contract arc.
 
 _Reproduce:_ `python studies/fundamental_momentum.py --years 8`
+
+---
+
+## Addendum — PEAD event study (`studies/earnings_drift.py`)
+
+Re-framed as event-time: abnormal return (stock − SPY) after each quarterly
+report, split by revenue-acceleration sign. 2,197 events (1,088 positive / 1,109
+negative).
+
+| window | positive CAR | negative CAR | spread (pos−neg) |
+|--------|-------------:|-------------:|-----------------:|
+| [−5,−1] | +0.263% (t=+1.78) | −0.122% | +0.385% |
+| [0,0]   | +0.123% | −0.127% | +0.250% |
+| [1,5]   | −0.077% | +0.139% | −0.217% |
+| [1,20]  | **−0.413% (t=−2.06)** | +0.253% | −0.667% |
+| [1,60]  | +0.080% | **+0.993% (t=+2.84)** | −0.913% |
+
+**The sign is *reversal*, not drift.** Accelerating-revenue names run up *before*
+the 10-Q (the earnings announcement precedes the filing — note the +0.26% pre
+window), then underperform over the next 1–3 months; decelerating names do the
+opposite. This is the opposite of textbook PEAD and consistent with short-horizon
+**post-announcement reversal** in large caps.
+
+**Caveat (don't trade this yet):** the most-significant cells (neg [1,60]
+t=+2.84, pos [1,20] t=−2.06) rest on cross-event t-stats that assume
+independence, but earnings cluster in 2–3 week "seasons", so many names' windows
+overlap and share a common factor SPY-adjustment doesn't fully remove — exactly
+the inflation the contract event study exposed (where t=−5.2 collapsed to −1.9
+after de-overlapping). A proper test needs calendar-cluster-robust standard
+errors / a non-overlapping season sample. Treat the reversal as **suggestive,
+not established** — but it's the most interesting effect found so far and a clear
+next target.
+
+_Reproduce:_ `python studies/earnings_drift.py`
+
