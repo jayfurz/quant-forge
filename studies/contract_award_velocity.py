@@ -293,6 +293,38 @@ def _write_fama_macbeth_md(path, fm_out: dict, horizons: list[int], models: dict
     path.write_text("\n".join(lines) + "\n")
 
 
+def assemble_panel(bars: pl.DataFrame, store: FeatureStore, horizons: list[int]):
+    """
+    PIT-join the contract/size features to bars, add forward returns, 63-day
+    momentum, and (if shares + obligations are present) contract intensity.
+
+    Shared by run_study and the out-of-sample harness so both use *identical*
+    feature definitions. Returns (labeled_panel, pit_feature_names).
+    """
+    pit_features = [f for f in ("contract_award_velocity_z", "contract_oblig_ttm",
+                                "shares_outstanding") if f in store.feature_names()]
+    joined = PointInTimeJoiner(store).join(bars, feature_names=pit_features)
+    labeled = ForwardReturnLabeler(horizons=horizons).compute(joined)
+
+    # 63-day price momentum baseline.
+    labeled = labeled.with_columns(
+        ((pl.col("close") / pl.col("close").shift(63).over("symbol") - 1) * 100)
+        .alias("price_momentum_63d")
+    )
+
+    # Contract intensity = trailing-12m obligations / market cap (size-relative).
+    if {"contract_oblig_ttm", "shares_outstanding"} <= set(labeled.columns):
+        labeled = labeled.with_columns(
+            (pl.col("close") * pl.col("shares_outstanding")).alias("market_cap")
+        ).with_columns(
+            pl.when(pl.col("market_cap") > 0)
+            .then(pl.col("contract_oblig_ttm") / pl.col("market_cap"))
+            .otherwise(None)
+            .alias("contract_intensity")
+        )
+    return labeled, pit_features
+
+
 def run_study(
     output_dir: str = "reports/contract_award_velocity",
     lookback_years: int = 3,
@@ -352,59 +384,9 @@ def run_study(
     # Filter to only defense tickers (not benchmark) for main analysis
     defense_bars = bars.filter(pl.col("symbol") != SECTOR_ETF)
 
-    # ── 3. PIT join ────────────────────────────────────────────────
-    logger.info("=" * 60)
-    logger.info("STEP 3: Point-in-time join (features → bars)")
-    logger.info("=" * 60)
-
-    pit_features = ["contract_award_velocity_z", "contract_oblig_ttm",
-                    "shares_outstanding"]
-    pit_features = [f for f in pit_features if f in store.feature_names()]
-
-    joiner = PointInTimeJoiner(store)
-    joined = joiner.join(defense_bars, feature_names=pit_features)
-
-    coverage = joiner.join_summary(joined, pit_features)
-    logger.info("Feature coverage:\n%s", coverage)
-
-    # ── 4. Forward returns ─────────────────────────────────────────
-    logger.info("=" * 60)
-    logger.info("STEP 4: Computing forward returns (horizons: %s)",
-                 ", ".join(f"{h}d" for h in horizons))
-    logger.info("=" * 60)
-
-    labeler = ForwardReturnLabeler(horizons=horizons)
-    labeled = labeler.compute(joined)
-
-    # ── 5. Build derived features (momentum + contract intensity) ──
-    logger.info("=" * 60)
-    logger.info("STEP 5: Building baseline + size features")
-    logger.info("=" * 60)
-
-    # 63-day price momentum as baseline
-    labeled = labeled.with_columns(
-        ((pl.col("close") / pl.col("close").shift(63).over("symbol") - 1) * 100)
-        .alias("price_momentum_63d")
-    )
-
-    # Contract intensity = trailing-12m obligations / market cap. This is the
-    # "size of the contract relative to the company" signal — distinct from the
-    # velocity *ratio*, which is scale-free. Market cap uses PIT shares.
-    have_intensity = ("contract_oblig_ttm" in labeled.columns
-                      and "shares_outstanding" in labeled.columns)
-    if have_intensity:
-        labeled = labeled.with_columns(
-            (pl.col("close") * pl.col("shares_outstanding")).alias("market_cap")
-        ).with_columns(
-            pl.when(pl.col("market_cap") > 0)
-            .then(pl.col("contract_oblig_ttm") / pl.col("market_cap"))
-            .otherwise(None)
-            .alias("contract_intensity")
-        )
-        cov = labeled["contract_intensity"].drop_nulls().len()
-        logger.info("contract_intensity populated rows: %d / %d", cov, labeled.height)
-    else:
-        logger.warning("Missing oblig_ttm or shares — skipping contract_intensity")
+    # ── 3-5. Assemble the labeled panel (PIT join + returns + features) ──
+    labeled, pit_features = assemble_panel(defense_bars, store, horizons)
+    have_intensity = "contract_intensity" in labeled.columns
 
     # ── 6. Run studies ─────────────────────────────────────────────
     logger.info("=" * 60)

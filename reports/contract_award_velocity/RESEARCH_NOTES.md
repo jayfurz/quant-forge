@@ -1,3 +1,51 @@
+# Research Notes — Contract Award Velocity (v7: out-of-sample verdict)
+
+## v7 headline — the signal fails out of sample (final verdict)
+
+v6's size-relative `contract_intensity` was the one feature to clear
+significance in-sample (20d Fama–MacBeth t≈2.1–2.2). "Promising, not proven", so
+v7 tests it the only way that matters — on data the fit never saw
+(`studies/oos_intensity.py`, reusing the exact `assemble_panel` feature logic).
+
+**It does not survive.**
+
+| split | 20d intensity t | 60d intensity t |
+|-------|----------------:|----------------:|
+| full sample | +2.24 (n=95) | +1.57 (n=32) |
+| in-sample (1st half, ’18–’22) | +2.41 | +0.95 |
+| **OOS holdout (2nd half, ’22–’26)** | **+0.15** | +1.26 |
+| universe A (even tickers) | +0.84 | +0.26 |
+| universe B (odd tickers) | +2.34 | +2.16 |
+
+- **Temporal:** the entire 20d effect lived in the first half (t=2.41) and
+  **vanishes in the holdout (t=0.15).** Classic in-sample artifact.
+- **Universe:** it's concentrated in one arbitrary half of the names
+  (B=+2.34 vs A=+0.84), i.e. driven by a subset, not a broad effect.
+
+**Final verdict for the whole arc:** there is **no robust, exploitable equity
+alpha in public federal-contract data** for this universe. Every apparent signal
+dissolved under the appropriate stress test, and the pattern is the real lesson:
+
+| signal | looked like | killed by |
+|--------|-------------|-----------|
+| contract velocity (ratio) | ~0 from the start | — |
+| price momentum | 3y IC t=3.15 | 8y replication → t=0.19 |
+| large-award event drift | full-sample t=−5.2 | de-overlapping → t=−1.9 |
+| contract intensity (size) | wide-universe t=+2.1 | out-of-sample → t=+0.15 |
+
+The deliverable is a research platform that **reliably turns false positives
+into negatives** — exactly what protects real capital. The "consider contract
+size" intuition was directionally right (intensity > velocity), but the edge is
+not there once tested honestly.
+
+```bash
+python studies/oos_intensity.py    # after the wide study has populated caches
+```
+
+Report: `reports/oos_intensity/`.
+
+---
+
 # Research Notes — Contract Award Velocity (v6: wider universe)
 
 ## v6 headline — doubling the universe surfaces a (borderline) signal (read first)
