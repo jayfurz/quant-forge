@@ -1,3 +1,52 @@
+# Research Notes — Contract Award Velocity (v6: wider universe)
+
+## v6 headline — doubling the universe surfaces a (borderline) signal (read first)
+
+Every prior conclusion was power-limited: a ~24-name universe caps every
+cross-sectional t-stat. v6 roughly doubles it to **~46 federally-exposed names**
+(defense/aerospace + government IT services + federal-facing industrials;
+`--universe wide`, keyword-mapped so weak matches self-filter) and re-runs all
+analyses over 8 years.
+
+**The extra breadth changes the answer for the size feature:**
+
+- **`contract_intensity` (trailing-12m awards ÷ market cap) becomes
+  significant.** In the full Fama–MacBeth model `forward_20d ~ velocity +
+  intensity + momentum`, intensity is **b=+0.45, t=+2.11** (n=97), with velocity
+  t=−0.24 and momentum t=+0.34. Its sign is positive and consistent across
+  horizons (multivariate t = 2.11 / 1.57 / 1.44 at 20/60/120d; univariate IC t
+  = 1.47 / −0.23 / 1.45). In the 24-name universe this same coefficient was
+  t≈0.15 — the signal was there, we just lacked the power to see it. This
+  vindicates the "**consider the size of the contract**" intuition: it's the
+  size-relative feature, not the scale-free velocity ratio, that carries the
+  (modest) information.
+- **Velocity and momentum remain dead** (all |t| < 1.3 multivariate).
+- **Event study, wider universe:** the overlapping full sample is even more
+  inflated (60d CAR t=−5.17, n=1340 — ignore it); the de-overlapped robust set
+  (90-day spacing, 422 events) gives 60d CAR **−1.40%, t=−1.94** and 20d
+  **+0.49%, t=+1.39** — a hint of post-award underperformance that strengthens
+  with breadth but still doesn't clear |t|≈2.
+
+**Verdict:** with adequate cross-sectional breadth, **size-relative contract
+intensity is a marginally significant ~1-month predictor** (t≈2.0, positive),
+surviving controls for momentum and velocity — the one genuine, if small,
+signal in the whole arc. Treat it as *promising, not proven*: t≈2 with
+multiple horizons/models tested invites a multiple-comparisons discount, the
+wide universe's keyword mapping is noisy, and there is no out-of-sample
+confirmation. Next step would be a holdout / second universe, not more tuning.
+
+```bash
+python studies/contract_award_velocity.py --years 8 --universe wide \
+    --out reports/contract_award_velocity_wide
+python studies/contract_award_events.py --years 8 --universe wide \
+    --out reports/contract_award_events_wide                       # + --cluster-days 90 robust
+```
+
+Reports: `reports/contract_award_velocity_wide/` (see `fama_macbeth.md`),
+`reports/contract_award_events_wide{,_robust}/`.
+
+---
+
 # Research Notes — Contract Award Velocity (v5: + event study)
 
 ## v5 headline — event study around large awards (read this first)

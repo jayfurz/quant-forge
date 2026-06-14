@@ -33,7 +33,9 @@ from research import EventStudy  # noqa: E402
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-from contract_award_velocity import DEFENSE_UNIVERSE, SECTOR_ETF, get_price_data  # noqa: E402
+from contract_award_velocity import (  # noqa: E402
+    DEFENSE_UNIVERSE, SECTOR_ETF, UNIVERSES, get_price_data,
+)
 
 
 def build_events(
@@ -76,16 +78,17 @@ def build_events(
 
 
 def run_study(output_dir="reports/contract_award_events", lookback_years=8,
-              min_award=50e6, pre=5, post=60, cluster_days=7):
+              min_award=50e6, pre=5, post=60, cluster_days=7, universe=None):
+    universe = universe or DEFENSE_UNIVERSE
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     end = datetime.now().strftime("%Y-%m-%d")
     start = (datetime.now() - timedelta(days=lookback_years * 365)).strftime("%Y-%m-%d")
 
-    logger.info("STEP 1: Building large-award events (>= $%.0fM, cluster=%dd)",
-                min_award / 1e6, cluster_days)
-    events = build_events(DEFENSE_UNIVERSE, start, end, min_award, cluster_days=cluster_days)
+    logger.info("STEP 1: Building large-award events (%d names, >= $%.0fM, cluster=%dd)",
+                len(universe), min_award / 1e6, cluster_days)
+    events = build_events(universe, start, end, min_award, cluster_days=cluster_days)
     if events.is_empty():
         logger.error("No events built")
         return
@@ -94,7 +97,7 @@ def run_study(output_dir="reports/contract_award_events", lookback_years=8,
                 events["event_date"].min(), events["event_date"].max())
 
     logger.info("STEP 2: Loading price data")
-    bars = get_price_data(list(DEFENSE_UNIVERSE.keys()), start, end)
+    bars = get_price_data(list(universe.keys()), start, end)
     if bars.is_empty():
         logger.error("No price data")
         return
@@ -155,5 +158,7 @@ if __name__ == "__main__":
     p.add_argument("--cluster-days", type=int, default=7,
                    help="Min calendar-day spacing between a symbol's events "
                         "(raise to ~90 for near-independent 60d windows)")
+    p.add_argument("--universe", choices=list(UNIVERSES), default="defense")
     a = p.parse_args()
-    run_study(a.out, a.years, a.min_award, a.pre, a.post, a.cluster_days)
+    run_study(a.out, a.years, a.min_award, a.pre, a.post, a.cluster_days,
+              universe=UNIVERSES[a.universe])

@@ -76,6 +76,44 @@ DEFENSE_UNIVERSE = {
     "WWD":  "Woodward Inc",
 }
 
+# ── Wider federal-contractor universe ──────────────────────────────
+# Defense/aerospace + government IT services + federally-exposed industrials.
+# The point is cross-sectional breadth: a ~24-name universe caps every t-stat,
+# so this roughly doubles it. Mapping is keyword-based (USAspending recipient
+# search), so a few names match imperfectly — those self-filter via low coverage.
+_WIDE_ADDITIONS = {
+    # aerospace / defense components & systems
+    "HWM":  "Howmet Aerospace",
+    "TDY":  "Teledyne",
+    "DCO":  "Ducommun",
+    "TGI":  "Triumph Group",
+    "OSK":  "Oshkosh",
+    "DRS":  "Leonardo DRS",
+    "HXL":  "Hexcel",
+    "VSAT": "Viasat",
+    "ESLT": "Elbit Systems",
+    "RKLB": "Rocket Lab",
+    "CR":   "Crane Company",
+    "MOG-A": "Moog",
+    # government IT / engineering services
+    "ACN":  "Accenture Federal",
+    "ICFI": "ICF International",
+    "ACM":  "AECOM",
+    "J":    "Jacobs Solutions",
+    "AMTM": "Amentum",
+    "VVX":  "V2X",
+    "DXC":  "DXC Technology",
+    "GD":   "General Dynamics",  # (already present; dict dedupes)
+    # diversified industrials with material federal exposure
+    "HON":  "Honeywell",
+    "GE":   "GE Aerospace",
+    "CAT":  "Caterpillar",
+    "EMR":  "Emerson Electric",
+}
+WIDE_UNIVERSE = {**DEFENSE_UNIVERSE, **_WIDE_ADDITIONS}
+
+UNIVERSES = {"defense": DEFENSE_UNIVERSE, "wide": WIDE_UNIVERSE}
+
 SECTOR_ETF = "ITA"  # iShares US Aerospace & Defense ETF (benchmark)
 
 
@@ -259,31 +297,37 @@ def run_study(
     output_dir: str = "reports/contract_award_velocity",
     lookback_years: int = 3,
     horizons: list[int] | None = None,
+    universe: dict[str, str] | None = None,
 ):
     """Run the full contract award velocity signal study."""
     if horizons is None:
         horizons = [20, 60, 120]
+    if universe is None:
+        universe = DEFENSE_UNIVERSE
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     # ── 1. Build features ──────────────────────────────────────────
     logger.info("=" * 60)
-    logger.info("STEP 1: Building contract award velocity feature")
+    logger.info("STEP 1: Building contract award velocity feature (%d names)",
+                len(universe))
     logger.info("=" * 60)
 
-    features = build_contract_feature(DEFENSE_UNIVERSE, lookback_years)
+    features = build_contract_feature(universe, lookback_years)
 
     if features.is_empty():
         logger.error("No features generated. Check USAspending API or vendor names.")
         return
 
-    store = FeatureStore("data/features")
+    # Use a universe-scoped feature store so runs with different universes don't
+    # collide / leak features into one another.
+    store = FeatureStore(f"data/features/{out.name}")
     store.add_features(features)
 
     # Size input: point-in-time shares outstanding (for market-cap-relative
     # contract intensity).
-    size_feats = build_size_features(DEFENSE_UNIVERSE)
+    size_feats = build_size_features(universe)
     if not size_feats.is_empty():
         store.add_features(size_feats)
 
@@ -298,7 +342,7 @@ def run_study(
     end_date = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=lookback_years * 365)).strftime("%Y-%m-%d")
 
-    tickers = list(DEFENSE_UNIVERSE.keys())
+    tickers = list(universe.keys())
     bars = get_price_data(tickers, start_date, end_date)
 
     if bars.is_empty():
@@ -450,6 +494,8 @@ if __name__ == "__main__":
                         help="Output directory")
     parser.add_argument("--horizons", default="20,60,120",
                         help="Forward return horizons (comma-separated days)")
+    parser.add_argument("--universe", choices=list(UNIVERSES), default="defense",
+                        help="Which universe to run (default: defense)")
     args = parser.parse_args()
 
     horizons = [int(h.strip()) for h in args.horizons.split(",")]
@@ -458,4 +504,5 @@ if __name__ == "__main__":
         output_dir=args.out,
         lookback_years=args.years,
         horizons=horizons,
+        universe=UNIVERSES[args.universe],
     )
