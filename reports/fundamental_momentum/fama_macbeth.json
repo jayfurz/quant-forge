@@ -1,0 +1,83 @@
+{
+  "20d": {
+    "features": [
+      "rev_yoy_accel",
+      "rev_yoy_growth",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "rev_yoy_accel": {
+        "mean": -0.057919031719871006,
+        "t_stat": -0.48429061209926877,
+        "std": 1.1778801677654673
+      },
+      "rev_yoy_growth": {
+        "mean": 0.13788643699588668,
+        "t_stat": 1.0568787805055042,
+        "std": 1.2849381933084738
+      },
+      "price_momentum_63d": {
+        "mean": 0.19371124727927136,
+        "t_stat": 0.8951588719786553,
+        "std": 2.131280366852687
+      }
+    },
+    "n_periods": 97,
+    "avg_r2": 0.09567224571653887,
+    "rebalance_days": 20
+  },
+  "60d": {
+    "features": [
+      "rev_yoy_accel",
+      "rev_yoy_growth",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "rev_yoy_accel": {
+        "mean": 0.48859591379545975,
+        "t_stat": 1.3268697551505069,
+        "std": 2.0830347971304453
+      },
+      "rev_yoy_growth": {
+        "mean": 0.08110421807907939,
+        "t_stat": 0.19496814288748757,
+        "std": 2.353177980246541
+      },
+      "price_momentum_63d": {
+        "mean": 0.5835437733061235,
+        "t_stat": 1.1317422921532752,
+        "std": 2.916761259766102
+      }
+    },
+    "n_periods": 32,
+    "avg_r2": 0.07828843956610382,
+    "rebalance_days": 60
+  },
+  "120d": {
+    "features": [
+      "rev_yoy_accel",
+      "rev_yoy_growth",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "rev_yoy_accel": {
+        "mean": 0.5304646233283813,
+        "t_stat": 0.6914229737716763,
+        "std": 3.068828450606577
+      },
+      "rev_yoy_growth": {
+        "mean": -1.021400784137228,
+        "t_stat": -1.0432731953737326,
+        "std": 3.9161392765250933
+      },
+      "price_momentum_63d": {
+        "mean": 3.298474831286171,
+        "t_stat": 1.6000275664523345,
+        "std": 8.246045006836285
+      }
+    },
+    "n_periods": 16,
+    "avg_r2": 0.10008689949740805,
+    "rebalance_days": 120
+  }
+}

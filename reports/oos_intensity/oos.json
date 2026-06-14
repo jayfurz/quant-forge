@@ -1,0 +1,166 @@
+{
+  "full": {
+    "20d": {
+      "n_periods": 95,
+      "contract_award_velocity_z": {
+        "b": 0.029,
+        "t": 0.2
+      },
+      "contract_intensity": {
+        "b": 0.481,
+        "t": 2.24
+      },
+      "price_momentum_63d": {
+        "b": 0.088,
+        "t": 0.26
+      }
+    },
+    "60d": {
+      "n_periods": 32,
+      "contract_award_velocity_z": {
+        "b": -0.588,
+        "t": -1.18
+      },
+      "contract_intensity": {
+        "b": 2.312,
+        "t": 1.57
+      },
+      "price_momentum_63d": {
+        "b": -0.099,
+        "t": -0.1
+      }
+    }
+  },
+  "temporal": {
+    "in_sample_first_half": {
+      "20d": {
+        "n_periods": 48,
+        "contract_award_velocity_z": {
+          "b": 0.061,
+          "t": 0.31
+        },
+        "contract_intensity": {
+          "b": 0.749,
+          "t": 2.41
+        },
+        "price_momentum_63d": {
+          "b": -0.54,
+          "t": -1.48
+        }
+      },
+      "60d": {
+        "n_periods": 16,
+        "contract_award_velocity_z": {
+          "b": 0.212,
+          "t": 0.35
+        },
+        "contract_intensity": {
+          "b": 0.84,
+          "t": 0.95
+        },
+        "price_momentum_63d": {
+          "b": -2.127,
+          "t": -1.84
+        }
+      }
+    },
+    "oos_second_half": {
+      "20d": {
+        "n_periods": 48,
+        "contract_award_velocity_z": {
+          "b": -0.218,
+          "t": -1.17
+        },
+        "contract_intensity": {
+          "b": 0.059,
+          "t": 0.15
+        },
+        "price_momentum_63d": {
+          "b": -0.049,
+          "t": -0.09
+        }
+      },
+      "60d": {
+        "n_periods": 16,
+        "contract_award_velocity_z": {
+          "b": -1.368,
+          "t": -2.83
+        },
+        "contract_intensity": {
+          "b": 2.646,
+          "t": 1.26
+        },
+        "price_momentum_63d": {
+          "b": 1.402,
+          "t": 0.82
+        }
+      }
+    }
+  },
+  "universe": {
+    "universe_A": {
+      "20d": {
+        "n_periods": 95,
+        "contract_award_velocity_z": {
+          "b": 0.211,
+          "t": 1.06
+        },
+        "contract_intensity": {
+          "b": 0.193,
+          "t": 0.84
+        },
+        "price_momentum_63d": {
+          "b": -0.049,
+          "t": -0.18
+        }
+      },
+      "60d": {
+        "n_periods": 32,
+        "contract_award_velocity_z": {
+          "b": -0.631,
+          "t": -1.02
+        },
+        "contract_intensity": {
+          "b": 0.209,
+          "t": 0.26
+        },
+        "price_momentum_63d": {
+          "b": -0.811,
+          "t": -0.86
+        }
+      }
+    },
+    "universe_B": {
+      "20d": {
+        "n_periods": 95,
+        "contract_award_velocity_z": {
+          "b": 0.13,
+          "t": 0.54
+        },
+        "contract_intensity": {
+          "b": 0.836,
+          "t": 2.34
+        },
+        "price_momentum_63d": {
+          "b": -0.099,
+          "t": -0.2
+        }
+      },
+      "60d": {
+        "n_periods": 32,
+        "contract_award_velocity_z": {
+          "b": -0.35,
+          "t": -0.47
+        },
+        "contract_intensity": {
+          "b": 4.039,
+          "t": 2.16
+        },
+        "price_momentum_63d": {
+          "b": 0.132,
+          "t": 0.1
+        }
+      }
+    }
+  }
+}

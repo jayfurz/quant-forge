@@ -1,0 +1,105 @@
+{
+  "groups": {
+    "positive_1_20": {
+      "n": 1088,
+      "n_months": 172,
+      "mean_pct": -0.413,
+      "naive_t": -2.06,
+      "clustered_t": -1.97
+    },
+    "negative_1_20": {
+      "n": 1109,
+      "n_months": 168,
+      "mean_pct": 0.253,
+      "naive_t": 1.21,
+      "clustered_t": 0.72
+    },
+    "positive_1_60": {
+      "n": 1088,
+      "n_months": 172,
+      "mean_pct": 0.08,
+      "naive_t": 0.23,
+      "clustered_t": 0.71
+    },
+    "negative_1_60": {
+      "n": 1109,
+      "n_months": 168,
+      "mean_pct": 0.993,
+      "naive_t": 2.84,
+      "clustered_t": 3.24
+    }
+  },
+  "long_short": {
+    "1_20": {
+      "n": 2197,
+      "n_months": 188,
+      "mean_pct": 0.332,
+      "naive_t": 2.29,
+      "clustered_t": 1.24
+    },
+    "1_60": {
+      "n": 2197,
+      "n_months": 188,
+      "mean_pct": 0.473,
+      "naive_t": 1.9,
+      "clustered_t": 2.29
+    }
+  },
+  "liquidity": {
+    "low_liquidity": {
+      "n": 559,
+      "n_months": 69,
+      "mean_pct": -0.201,
+      "naive_t": -0.37,
+      "clustered_t": -0.5
+    },
+    "mid_liquidity": {
+      "n": 557,
+      "n_months": 88,
+      "mean_pct": 1.143,
+      "naive_t": 2.4,
+      "clustered_t": 1.65
+    },
+    "high_liquidity": {
+      "n": 558,
+      "n_months": 89,
+      "mean_pct": 0.726,
+      "naive_t": 1.22,
+      "clustered_t": 2.09
+    }
+  },
+  "oos": {
+    "first_half": {
+      "long_short_1_60": {
+        "n": 1096,
+        "n_months": 127,
+        "mean_pct": 0.062,
+        "naive_t": 0.2,
+        "clustered_t": 0.59
+      },
+      "long_short_1_20": {
+        "n": 1096,
+        "n_months": 127,
+        "mean_pct": 0.226,
+        "naive_t": 1.18,
+        "clustered_t": 0.66
+      }
+    },
+    "second_half": {
+      "long_short_1_60": {
+        "n": 1101,
+        "n_months": 62,
+        "mean_pct": 0.909,
+        "naive_t": 2.3,
+        "clustered_t": 2.71
+      },
+      "long_short_1_20": {
+        "n": 1101,
+        "n_months": 62,
+        "mean_pct": 0.44,
+        "naive_t": 2.0,
+        "clustered_t": 1.26
+      }
+    }
+  }
+}

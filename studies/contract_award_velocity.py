@@ -35,6 +35,9 @@ from research import (
     PointInTimeJoiner,
     ForwardReturnLabeler,
     SignalStudyRunner,
+    build_award_velocity,
+    build_trailing_obligations,
+    fama_macbeth,
 )
 
 logging.basicConfig(
@@ -73,200 +76,150 @@ DEFENSE_UNIVERSE = {
     "WWD":  "Woodward Inc",
 }
 
+# ── Wider federal-contractor universe ──────────────────────────────
+# Defense/aerospace + government IT services + federally-exposed industrials.
+# The point is cross-sectional breadth: a ~24-name universe caps every t-stat,
+# so this roughly doubles it. Mapping is keyword-based (USAspending recipient
+# search), so a few names match imperfectly — those self-filter via low coverage.
+_WIDE_ADDITIONS = {
+    # aerospace / defense components & systems
+    "HWM":  "Howmet Aerospace",
+    "TDY":  "Teledyne",
+    "DCO":  "Ducommun",
+    "TGI":  "Triumph Group",
+    "OSK":  "Oshkosh",
+    "DRS":  "Leonardo DRS",
+    "HXL":  "Hexcel",
+    "VSAT": "Viasat",
+    "ESLT": "Elbit Systems",
+    "RKLB": "Rocket Lab",
+    "CR":   "Crane Company",
+    "MOG-A": "Moog",
+    # government IT / engineering services
+    "ACN":  "Accenture Federal",
+    "ICFI": "ICF International",
+    "ACM":  "AECOM",
+    "J":    "Jacobs Solutions",
+    "AMTM": "Amentum",
+    "VVX":  "V2X",
+    "DXC":  "DXC Technology",
+    "GD":   "General Dynamics",  # (already present; dict dedupes)
+    # diversified industrials with material federal exposure
+    "HON":  "Honeywell",
+    "GE":   "GE Aerospace",
+    "CAT":  "Caterpillar",
+    "EMR":  "Emerson Electric",
+}
+WIDE_UNIVERSE = {**DEFENSE_UNIVERSE, **_WIDE_ADDITIONS}
+
+UNIVERSES = {"defense": DEFENSE_UNIVERSE, "wide": WIDE_UNIVERSE}
+
 SECTOR_ETF = "ITA"  # iShares US Aerospace & Defense ETF (benchmark)
 
 
 def build_contract_feature(
     vendor_ticker_map: dict[str, str],
     lookback_years: int = 3,
+    reporting_lag_days: int = 45,
 ) -> pl.DataFrame:
     """
-    Fetch USAspending data and build contract_award_velocity_z.
+    Fetch monthly USAspending obligation totals and build a point-in-time
+    contract_award_velocity_z feature.
 
-    Returns DataFrame with columns:
+    Uses the ``spending_over_time`` endpoint (server-aggregated monthly
+    obligations, complete and untruncated) rather than the award endpoint
+    (cumulative current obligation stamped at a single PoP-start date — a
+    lookahead trap) or raw transaction pagination (which truncates the oldest
+    history for high-volume primes). See
+    reports/contract_award_velocity/RESEARCH_NOTES.md. The velocity /
+    trailing-z-score / reporting-lag logic lives in
+    research.features.build_award_velocity so it is testable in isolation.
+
+    Returns the FeatureStore schema:
         symbol, ts_available, feature_name, feature_value,
         source, source_event_id, asof_date
     """
-    from downloaders.gov_contracts import fetch_defense_contracts_by_vendor
+    from downloaders.gov_contracts import fetch_monthly_obligations_by_vendor
 
     vendor_names = list(vendor_ticker_map.values())
+    # Pull extra history so the trailing baseline window is warm by the time the
+    # study's price sample starts.
     end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=lookback_years * 365)).strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=(lookback_years + 3) * 365)).strftime("%Y-%m-%d")
 
-    logger.info("Fetching USAspending data for %d vendors (%s → %s)",
+    logger.info("Fetching USAspending monthly obligations for %d vendors (%s → %s)",
                  len(vendor_names), start_date, end_date)
 
-    contracts = fetch_defense_contracts_by_vendor(vendor_names, start_date, end_date)
+    monthly = fetch_monthly_obligations_by_vendor(vendor_names, start_date, end_date)
 
-    if contracts.is_empty():
-        logger.warning("No contract data returned from USAspending")
+    if monthly.is_empty():
+        logger.warning("No monthly obligation data returned from USAspending")
         return pl.DataFrame()
 
-    logger.info("Got %d contract awards", contracts.height)
+    logger.info("Got %d vendor-months", monthly.height)
 
-    # Build vendor → ticker reverse map
+    # Map the search-keyword vendor name → ticker (keyword == universe name).
     vendor_to_ticker = {v: k for k, v in vendor_ticker_map.items()}
+    monthly = monthly.with_columns(
+        pl.col("vendor").replace_strict(vendor_to_ticker, default=None).alias("symbol")
+    ).drop_nulls(subset=["symbol"])
 
-    # Normalize column names - check what's actually available
-    cols = contracts.columns
-    logger.info("Contract columns: %s", cols)
-
-    # The API returns various field names. Find the relevant ones.
-    amount_col = None
-    for candidate in ["Award Amount", "award_amount", "federal_action_obligation",
-                       "total_obligated_amount", "awarding_agency_name"]:
-        if candidate in cols:
-            if candidate != "awarding_agency_name":
-                amount_col = candidate
-                break
-
-    vendor_col = None
-    for candidate in ["Recipient Name", "recipient_name", "awardee_or_recipient_legal_entity_name"]:
-        if candidate in cols:
-            vendor_col = candidate
-            break
-
-    date_col = None
-    for candidate in ["Start Date", "start_date", "period_of_performance_start_date",
-                       "action_date", "award_date"]:
-        if candidate in cols:
-            date_col = candidate
-            break
-
-    agency_col = "Awarding Agency" if "Awarding Agency" in cols else (
-        "awarding_agency_name" if "awarding_agency_name" in cols else None)
-
-    if not amount_col or not vendor_col or not date_col:
-        logger.error("Cannot find required columns. Available: %s", cols)
+    if monthly.is_empty():
+        logger.warning("No vendor-months mapped to universe tickers")
         return pl.DataFrame()
 
-    logger.info("Using columns: amount=%s, vendor=%s, date=%s",
-                 amount_col, vendor_col, date_col)
+    # build_award_velocity treats each row as a dated obligation total; the
+    # monthly month-end date is the natural action_date here.
+    obl = monthly.select(["symbol", pl.col("month").alias("action_date"), "amount"])
 
-    # Build feature rows
-    rows = []
-    for row in contracts.iter_rows(named=True):
-        vendor_name = str(row.get(vendor_col, "")).strip()
-        ticker = vendor_to_ticker.get(vendor_name)
-        if not ticker:
-            # Try partial match
-            for vn, tk in vendor_to_ticker.items():
-                if vn.lower() in vendor_name.lower():
-                    ticker = tk
-                    break
-        if not ticker:
-            continue
+    velocity = build_award_velocity(
+        obl, recent_days=90, baseline_days=730, reporting_lag_days=reporting_lag_days,
+    )
+    # Raw trailing-12-month dollar obligations — the "size" numerator that the
+    # velocity ratio discards (combined with market cap → contract intensity).
+    ttm = build_trailing_obligations(
+        obl, window_days=365, reporting_lag_days=reporting_lag_days,
+    )
 
-        try:
-            amount = float(row.get(amount_col, 0) or 0)
-        except (ValueError, TypeError):
-            amount = 0.0
-
-        if amount <= 0:
-            continue
-
-        award_date_str = str(row.get(date_col, ""))
-        try:
-            award_date = datetime.strptime(award_date_str[:10], "%Y-%m-%d")
-        except (ValueError, TypeError):
-            continue
-
-        agency = str(row.get(agency_col, "")) if agency_col else ""
-
-        rows.append({
-            "symbol": ticker,
-            "ts_available": award_date,
-            "feature_name": "contract_award_value",
-            "feature_value": amount,
-            "source": "usaspending",
-            "source_event_id": str(row.get("Award ID", row.get("award_id", ""))),
-            "asof_date": award_date,
-            "agency": agency,
-        })
-
-    if not rows:
-        logger.warning("No mapped contract rows after vendor matching")
+    parts = [f for f in (velocity, ttm) if not f.is_empty()]
+    if not parts:
+        logger.warning("No contract features produced")
         return pl.DataFrame()
 
-    raw = pl.DataFrame(rows)
+    features = pl.concat(parts, how="diagonal_relaxed")
+    logger.info("Built contract features: %d rows (%s)", features.height,
+                 ", ".join(features["feature_name"].unique().to_list()))
+    return features
 
-    # ── Build contract_award_velocity_z ────────────────────────────
-    # For each ticker, compute rolling 90-day award total
-    # Then normalize: velocity = 90d_total / trailing_2yr_avg_90d
-    raw = raw.sort(["symbol", "ts_available"])
 
-    # Aggregate daily award totals per symbol
-    daily_awards = raw.group_by(["symbol", "ts_available"]).agg(
-        pl.col("feature_value").sum().alias("daily_total")
-    ).sort(["symbol", "ts_available"])
+def build_size_features(vendor_ticker_map: dict[str, str]) -> pl.DataFrame:
+    """
+    Fetch point-in-time shares outstanding (SEC dei cover-page count) for the
+    universe and emit it as a FeatureStore feature (`shares_outstanding`), so it
+    PIT-joins to bars like any other signal and lets us form market cap without
+    lookahead.
+    """
+    from downloaders.sec_edgar import fetch_shares_outstanding
 
-    # Rolling 90-day sum per symbol
-    daily_awards = daily_awards.with_columns(
-        pl.col("daily_total")
-        .rolling_sum(window_size=90, min_periods=1)
-        .over("symbol")
-        .alias("rolling_90d_sum"),
-        pl.col("daily_total")
-        .rolling_sum(window_size=730, min_periods=1)
-        .over("symbol")
-        .alias("rolling_2yr_sum"),
-    )
+    frames = []
+    for ticker in vendor_ticker_map:
+        df = fetch_shares_outstanding(ticker)
+        if not df.is_empty():
+            frames.append(df)
+    if not frames:
+        logger.warning("No shares-outstanding data fetched")
+        return pl.DataFrame()
 
-    # Average 90-day award over 2 years = rolling_2yr_sum / (730/90) = rolling_2yr_sum / 8.11
-    # Actually: avg 90-day total = total 2yr / (2*365/90) ≈ total_2yr / 8.11
-    # Let's use rolling mean over 730 days as a simpler approach
-    daily_averages = daily_awards.with_columns(
-        pl.col("daily_total")
-        .rolling_mean(window_size=730, min_periods=90)
-        .over("symbol")
-        .alias("trailing_2yr_avg")
-    )
-
-    # velocity = 90d / trailing 2yr average
-    velocity = daily_averages.with_columns(
-        (pl.col("rolling_90d_sum") / pl.col("trailing_2yr_avg"))
-        .alias("velocity_raw")
-    )
-
-    # Replace inf/nan
-    velocity = velocity.with_columns(
-        pl.when(pl.col("velocity_raw").is_infinite())
-        .then(pl.lit(None, dtype=pl.Float64))
-        .when(pl.col("velocity_raw").is_nan())
-        .then(pl.lit(None, dtype=pl.Float64))
-        .otherwise(pl.col("velocity_raw"))
-        .alias("velocity_raw")
-    )
-
-    # Z-score normalize per ticker
-    velocity = velocity.with_columns([
-        pl.col("velocity_raw").mean().over("symbol").alias("_mean"),
-        pl.col("velocity_raw").std().over("symbol").alias("_std"),
-    ])
-
-    velocity = velocity.with_columns(
-        ((pl.col("velocity_raw") - pl.col("_mean")) / pl.col("_std"))
-        .alias("contract_award_velocity_z")
-    )
-
-    # Drop rows where velocity_z is null (not enough history)
-    velocity = velocity.drop_nulls(subset=["contract_award_velocity_z"])
-
-    # Build final feature DataFrame
-    features = velocity.select([
+    shares = pl.concat(frames, how="diagonal_relaxed")
+    return shares.select([
         pl.col("symbol"),
         pl.col("ts_available"),
-        pl.lit("contract_award_velocity_z").alias("feature_name"),
-        pl.col("contract_award_velocity_z").alias("feature_value"),
-        pl.lit("usaspending").alias("source"),
+        pl.lit("shares_outstanding").alias("feature_name"),
+        pl.col("shares").alias("feature_value"),
+        pl.lit("sec_edgar").alias("source"),
         pl.lit("").alias("source_event_id"),
         pl.col("ts_available").alias("asof_date"),
     ])
-
-    logger.info("Built contract_award_velocity_z: %d rows for %d symbols",
-                 features.height, features["symbol"].n_unique())
-
-    return features
 
 
 def get_price_data(
@@ -313,31 +266,102 @@ def get_price_data(
     return combined
 
 
+def _write_fama_macbeth_md(path, fm_out: dict, horizons: list[int], models: dict):
+    """Render Fama–MacBeth coefficients/t-stats to a markdown table."""
+    lines = [
+        "# Fama–MacBeth — incremental predictive power",
+        "",
+        "Cross-sectional regression of forward return on standardized features,",
+        "averaged across non-overlapping periods. `t` is the Fama–MacBeth t-stat",
+        "(|t| ≳ 2 ⇒ the feature adds information beyond the others).",
+        "",
+    ]
+    for name, feats in models.items():
+        lines += [f"## {name}", "",
+                  "| horizon | n | " + " | ".join(feats) + " |",
+                  "|---|---|" + "|".join(["---"] * len(feats)) + "|"]
+        for h in horizons:
+            res = fm_out.get(f"{name}_{h}d")
+            if not res:
+                continue
+            cells = []
+            for f in feats:
+                c = res["coefficients"].get(f, {})
+                cells.append(f"b={c.get('mean', 0):+.3f}, t={c.get('t_stat', 0):+.2f}")
+            lines.append(f"| {h}d | {res['n_periods']} | " + " | ".join(cells) + " |")
+        lines.append("")
+    path.write_text("\n".join(lines) + "\n")
+
+
+def assemble_panel(bars: pl.DataFrame, store: FeatureStore, horizons: list[int]):
+    """
+    PIT-join the contract/size features to bars, add forward returns, 63-day
+    momentum, and (if shares + obligations are present) contract intensity.
+
+    Shared by run_study and the out-of-sample harness so both use *identical*
+    feature definitions. Returns (labeled_panel, pit_feature_names).
+    """
+    pit_features = [f for f in ("contract_award_velocity_z", "contract_oblig_ttm",
+                                "shares_outstanding") if f in store.feature_names()]
+    joined = PointInTimeJoiner(store).join(bars, feature_names=pit_features)
+    labeled = ForwardReturnLabeler(horizons=horizons).compute(joined)
+
+    # 63-day price momentum baseline.
+    labeled = labeled.with_columns(
+        ((pl.col("close") / pl.col("close").shift(63).over("symbol") - 1) * 100)
+        .alias("price_momentum_63d")
+    )
+
+    # Contract intensity = trailing-12m obligations / market cap (size-relative).
+    if {"contract_oblig_ttm", "shares_outstanding"} <= set(labeled.columns):
+        labeled = labeled.with_columns(
+            (pl.col("close") * pl.col("shares_outstanding")).alias("market_cap")
+        ).with_columns(
+            pl.when(pl.col("market_cap") > 0)
+            .then(pl.col("contract_oblig_ttm") / pl.col("market_cap"))
+            .otherwise(None)
+            .alias("contract_intensity")
+        )
+    return labeled, pit_features
+
+
 def run_study(
     output_dir: str = "reports/contract_award_velocity",
     lookback_years: int = 3,
     horizons: list[int] | None = None,
+    universe: dict[str, str] | None = None,
 ):
     """Run the full contract award velocity signal study."""
     if horizons is None:
         horizons = [20, 60, 120]
+    if universe is None:
+        universe = DEFENSE_UNIVERSE
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
     # ── 1. Build features ──────────────────────────────────────────
     logger.info("=" * 60)
-    logger.info("STEP 1: Building contract award velocity feature")
+    logger.info("STEP 1: Building contract award velocity feature (%d names)",
+                len(universe))
     logger.info("=" * 60)
 
-    features = build_contract_feature(DEFENSE_UNIVERSE, lookback_years)
+    features = build_contract_feature(universe, lookback_years)
 
     if features.is_empty():
         logger.error("No features generated. Check USAspending API or vendor names.")
         return
 
-    store = FeatureStore("data/features")
+    # Use a universe-scoped feature store so runs with different universes don't
+    # collide / leak features into one another.
+    store = FeatureStore(f"data/features/{out.name}")
     store.add_features(features)
+
+    # Size input: point-in-time shares outstanding (for market-cap-relative
+    # contract intensity).
+    size_feats = build_size_features(universe)
+    if not size_feats.is_empty():
+        store.add_features(size_feats)
 
     summary = store.feature_summary()
     logger.info("Feature store summary:\n%s", summary)
@@ -350,7 +374,7 @@ def run_study(
     end_date = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=lookback_years * 365)).strftime("%Y-%m-%d")
 
-    tickers = list(DEFENSE_UNIVERSE.keys())
+    tickers = list(universe.keys())
     bars = get_price_data(tickers, start_date, end_date)
 
     if bars.is_empty():
@@ -360,36 +384,9 @@ def run_study(
     # Filter to only defense tickers (not benchmark) for main analysis
     defense_bars = bars.filter(pl.col("symbol") != SECTOR_ETF)
 
-    # ── 3. PIT join ────────────────────────────────────────────────
-    logger.info("=" * 60)
-    logger.info("STEP 3: Point-in-time join (features → bars)")
-    logger.info("=" * 60)
-
-    joiner = PointInTimeJoiner(store)
-    joined = joiner.join(defense_bars, feature_names=["contract_award_velocity_z"])
-
-    coverage = joiner.join_summary(joined, ["contract_award_velocity_z"])
-    logger.info("Feature coverage:\n%s", coverage)
-
-    # ── 4. Forward returns ─────────────────────────────────────────
-    logger.info("=" * 60)
-    logger.info("STEP 4: Computing forward returns (horizons: %s)",
-                 ", ".join(f"{h}d" for h in horizons))
-    logger.info("=" * 60)
-
-    labeler = ForwardReturnLabeler(horizons=horizons)
-    labeled = labeler.compute(joined)
-
-    # ── 5. Build baseline (price momentum) ─────────────────────────
-    logger.info("=" * 60)
-    logger.info("STEP 5: Building baseline features")
-    logger.info("=" * 60)
-
-    # 63-day price momentum as baseline
-    labeled = labeled.with_columns(
-        ((pl.col("close") / pl.col("close").shift(63).over("symbol") - 1) * 100)
-        .alias("price_momentum_63d")
-    )
+    # ── 3-5. Assemble the labeled panel (PIT join + returns + features) ──
+    labeled, pit_features = assemble_panel(defense_bars, store, horizons)
+    have_intensity = "contract_intensity" in labeled.columns
 
     # ── 6. Run studies ─────────────────────────────────────────────
     logger.info("=" * 60)
@@ -398,33 +395,61 @@ def run_study(
 
     runner = SignalStudyRunner(labeled)
 
+    # Univariate studies per feature that exists.
+    univariate = ["contract_award_velocity_z", "price_momentum_63d"]
+    if have_intensity:
+        univariate.append("contract_intensity")
+
+    report_name = {
+        "contract_award_velocity_z": "velocity",
+        "price_momentum_63d": "momentum_baseline",
+        "contract_intensity": "intensity",
+    }
+
     for horizon in horizons:
         forward_col = f"forward_{horizon}d_return"
         logger.info("\n--- %s ---", forward_col)
+        for feat in univariate:
+            try:
+                rep = runner.run(feature_name=feat, forward_col=forward_col)
+            except ValueError as e:
+                logger.warning("  %s skipped: %s", feat, e)
+                continue
+            runner.save_report(rep, out / f"{report_name[feat]}_{horizon}d")
+            ic = rep["ic_summary"]
+            logger.info("  %-26s IC=%+.4f t=%+.2f spread=%+.3f%%",
+                         feat, ic["pearson_ic_mean"], ic["ic_t_stat"],
+                         rep["quintile_spread"]["mean_spread"])
 
-        # Primary feature
-        report = runner.run(
-            feature_name="contract_award_velocity_z",
-            forward_col=forward_col,
-        )
-        runner.save_report(report, out / f"velocity_{horizon}d")
+    # ── 6b. Orthogonalization (Fama–MacBeth) ───────────────────────
+    logger.info("=" * 60)
+    logger.info("STEP 6b: Fama–MacBeth — does contract info survive controls?")
+    logger.info("=" * 60)
 
-        # Baseline comparison (price momentum)
-        baseline = runner.run(
-            feature_name="price_momentum_63d",
-            forward_col=forward_col,
-        )
-        runner.save_report(baseline, out / f"momentum_baseline_{horizon}d")
+    fm_models = {
+        "velocity_vs_momentum": ["contract_award_velocity_z", "price_momentum_63d"],
+    }
+    if have_intensity:
+        fm_models["intensity_vs_momentum"] = ["contract_intensity", "price_momentum_63d"]
+        fm_models["all_three"] = [
+            "contract_award_velocity_z", "contract_intensity", "price_momentum_63d"
+        ]
 
-        # Print comparison
-        vs = report["quintile_spread"]
-        bs = baseline["quintile_spread"]
-        logger.info(
-            "  velocity_z spread: mean=%.3f%%, sharpe=%.2f | "
-            "momentum spread: mean=%.3f%%, sharpe=%.2f",
-            vs.get("mean_spread", 0), vs.get("sharpe", 0),
-            bs.get("mean_spread", 0), bs.get("sharpe", 0),
-        )
+    fm_out = {}
+    for horizon in horizons:
+        forward_col = f"forward_{horizon}d_return"
+        for name, feats in fm_models.items():
+            res = fama_macbeth(labeled, feats, forward_col=forward_col)
+            fm_out[f"{name}_{horizon}d"] = res
+            coefs = " | ".join(
+                f"{f}: b={c['mean']:+.3f} t={c['t_stat']:+.2f}"
+                for f, c in res["coefficients"].items()
+            )
+            logger.info("  [%s %dd, n=%d] %s", name, horizon, res["n_periods"], coefs)
+
+    import json
+    (out / "fama_macbeth.json").write_text(json.dumps(fm_out, indent=2, default=str))
+    _write_fama_macbeth_md(out / "fama_macbeth.md", fm_out, horizons, fm_models)
 
     # ── 7. Summary ─────────────────────────────────────────────────
     logger.info("=" * 60)
@@ -451,6 +476,8 @@ if __name__ == "__main__":
                         help="Output directory")
     parser.add_argument("--horizons", default="20,60,120",
                         help="Forward return horizons (comma-separated days)")
+    parser.add_argument("--universe", choices=list(UNIVERSES), default="defense",
+                        help="Which universe to run (default: defense)")
     args = parser.parse_args()
 
     horizons = [int(h.strip()) for h in args.horizons.split(",")]
@@ -459,4 +486,5 @@ if __name__ == "__main__":
         output_dir=args.out,
         lookback_years=args.years,
         horizons=horizons,
+        universe=UNIVERSES[args.universe],
     )

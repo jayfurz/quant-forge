@@ -19,16 +19,31 @@ logger = logging.getLogger(__name__)
 # ── Yahoo Finance ─────────────────────────────────────────────────
 YAHOO_BASE = "https://query1.finance.yahoo.com/v8/finance/chart"
 
+# Yahoo rate-limits (HTTP 429) any request that doesn't look like a real
+# browser. A descriptive bot UA such as "QuantForge/0.1" is rejected
+# outright, so we present a standard desktop-browser User-Agent.
+YAHOO_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+}
+
+
 def download_yahoo(
     symbol: str,
     start: str,        # YYYY-MM-DD
     end: str,
     interval: str = "1d",  # 1d, 1wk, 1mo
-    output_dir: Optional[Path] = None
+    output_dir: Optional[Path] = None,
+    max_retries: int = 4,
 ) -> pl.DataFrame:
     """
     Download OHLCV from Yahoo Finance v8 API.
     Returns DataFrame with columns: ts, open, high, low, close, volume
+
+    Retries with exponential backoff on transient rate-limit (429) errors.
     """
     period1 = int(datetime.strptime(start, "%Y-%m-%d").timestamp())
     period2 = int(datetime.strptime(end, "%Y-%m-%d").timestamp())
@@ -42,11 +57,22 @@ def download_yahoo(
         "events": "div|split"
     }
 
-    resp = requests.get(
-        f"{YAHOO_BASE}/{symbol}",
-        params=params,
-        headers={"User-Agent": "QuantForge/0.1"}
-    )
+    resp = None
+    for attempt in range(max_retries):
+        resp = requests.get(
+            f"{YAHOO_BASE}/{symbol}",
+            params=params,
+            headers=YAHOO_HEADERS,
+            timeout=30,
+        )
+        if resp.status_code == 429:
+            wait = 2 ** attempt
+            logger.warning("Yahoo 429 for %s, retrying in %ds (attempt %d/%d)",
+                           symbol, wait, attempt + 1, max_retries)
+            time.sleep(wait)
+            continue
+        break
+
     resp.raise_for_status()
     data = resp.json()
 

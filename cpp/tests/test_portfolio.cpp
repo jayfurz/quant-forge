@@ -39,6 +39,34 @@ TEST_CASE("Portfolio position close") {
     CHECK(portfolio.account().positions.empty());
 }
 
+TEST_CASE("Portfolio partial close realizes gain with correct sign") {
+    SimulationConfig config{.initial_capital = 100000.0};
+    Portfolio portfolio(config);
+
+    portfolio.apply_fill(Fill{1, "AAPL", Side::Buy, 100.0, 100, 0});
+    portfolio.apply_fill(Fill{2, "AAPL", Side::Sell, 110.0, 40, 1});  // sell 40 of 100
+
+    REQUIRE(portfolio.account().positions.size() == 1);
+    const auto& pos = portfolio.account().positions[0];
+    CHECK(pos.quantity == doctest::Approx(60.0));
+    CHECK(pos.avg_entry == doctest::Approx(100.0));
+    CHECK(pos.realized_pnl == doctest::Approx(400.0));  // (110-100)*40, positive
+}
+
+TEST_CASE("Portfolio flip through zero realizes only the closed quantity") {
+    SimulationConfig config{.initial_capital = 100000.0};
+    Portfolio portfolio(config);
+
+    portfolio.apply_fill(Fill{1, "AAPL", Side::Buy, 100.0, 100, 0});
+    portfolio.apply_fill(Fill{2, "AAPL", Side::Sell, 110.0, 150, 1});  // sell 150 -> flip short 50
+
+    REQUIRE(portfolio.account().positions.size() == 1);
+    const auto& pos = portfolio.account().positions[0];
+    CHECK(pos.quantity == doctest::Approx(-50.0));     // now short 50
+    CHECK(pos.avg_entry == doctest::Approx(110.0));    // remainder opened at fill price
+    CHECK(pos.realized_pnl == doctest::Approx(1000.0)); // gain on the 100 closed only
+}
+
 TEST_CASE("Order fill slippage") {
     SimulationConfig config{.slippage_model_bps = 2.0};
     OrderManager om(config);

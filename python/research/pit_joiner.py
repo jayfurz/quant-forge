@@ -60,12 +60,15 @@ class PointInTimeJoiner:
             logger.warning("No features in store, returning bars unchanged")
             return bars.clone()
 
-        # Get all features for the relevant date range
+        # Get all features available up to the last bar. We must NOT lower-bound
+        # by the first bar date: a feature that became available *before* the
+        # first bar is still the valid carry-forward value for that bar, and
+        # clipping it out would leave early bars spuriously null.
         symbols = bars["symbol"].unique().to_list()
-        min_date = bars[bar_date_col].min()
         max_date = bars[bar_date_col].max()
+        epoch = datetime(1900, 1, 1)
 
-        features = self.store.query_range(symbols, names, min_date, max_date)
+        features = self.store.query_range(symbols, names, epoch, max_date)
 
         if features.is_empty():
             logger.warning("No features found in date range, returning bars unchanged")

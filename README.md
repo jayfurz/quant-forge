@@ -82,12 +82,28 @@ struct Strategy {
 ## Status
 
 - [x] Project scaffold
-- [x] Python data pipeline (Yahoo + SEC)
+- [x] Python data pipeline (Yahoo + SEC + USAspending)
+- [x] PIT research stack (FeatureStore, PIT joiner, forward returns, study runner)
 - [x] C++ types + indicators
-- [ ] C++ simulation engine implementation
-- [ ] C++ metrics implementation
-- [ ] Order/fill model implementation
-- [ ] Portfolio + P&L tracker
-- [ ] CLI runner
-- [ ] Test suite
-- [ ] Benchmark suite
+- [x] C++ simulation engine implementation
+- [x] C++ metrics implementation (round-trip P&L based)
+- [x] Order/fill model implementation
+- [x] Portfolio + P&L tracker
+- [x] CLI runner (`qf-runner`)
+- [x] Test suite (C++ `qf-tests`, Python `pytest python/tests`)
+- [ ] Benchmark suite (needs `benchmark` package)
+
+See `reports/contract_award_velocity/RESEARCH_NOTES.md` for the research
+write-up and the v1→v2 bug-fix / rearchitecture log.
+
+## Build & Test
+
+```bash
+# C++ (zero external deps)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+./build/qf-tests
+
+# Python
+pip install -e .            # or: pip install polars requests pyarrow numpy pytest
+python -m pytest python/tests -q
+```

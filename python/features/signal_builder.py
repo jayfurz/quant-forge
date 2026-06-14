@@ -55,7 +55,7 @@ def filing_diff_score(
         "default": 3, "bankruptcy": 4, "insolvency": 4, "going concern": 5,
         "restructuring": 2, "impairment": 2, "write-down": 2,
         "supply chain disruption": 2, "shortage": 2, "tariff": 2,
-        "geopolitical": 2, "conflict": 2, "sanction": 3,
+        "geopolitical": 2, "conflict": 2,
     }
 
     severity = 0
@@ -160,19 +160,18 @@ def defense_contract_signal(
     recent_total = recent["amount"].sum() if not recent.is_empty() else 0
     hist_total = historical["amount"].sum() if not historical.is_empty() else 0
 
-    # Expected recent (pro-rata)
+    # Expected recent (pro-rata from the historical daily award rate).
+    expected = 0.0
+    surprise = 0.0
     if not historical.is_empty():
         hist_days = (
             historical["start_date"].max() - historical["start_date"].min()
         ).days
         if hist_days > 0:
-            daily_rate = hist_total / max(hist_days, 1)
+            daily_rate = hist_total / hist_days
             expected = daily_rate * lookback_days
-            surprise = (recent_total - expected) / max(expected, 1) if expected > 0 else 0
-        else:
-            surprise = 0.0
-    else:
-        surprise = 0.0
+            if expected > 0:
+                surprise = (recent_total - expected) / expected
 
     # Award concentration (HHI)
     vendor_totals = (
@@ -189,7 +188,7 @@ def defense_contract_signal(
 
     return pl.DataFrame([{
         "recent_90d_awards": recent_total,
-        "expected_90d_awards": expected if 'expected' in dir() else 0.0,
+        "expected_90d_awards": expected,
         "contract_surprise_ratio": surprise,
         "award_concentration_hhi": hhi,
         "unique_agencies": contracts.filter(

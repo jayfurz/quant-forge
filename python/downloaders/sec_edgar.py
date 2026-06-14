@@ -142,6 +142,109 @@ def fetch_insider_trades(cik: str) -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
+# ── Shares Outstanding (point-in-time) ───────────────────────────
+def fetch_shares_outstanding(ticker: str) -> pl.DataFrame:
+    """
+    Fetch point-in-time common shares outstanding via the XBRL company-concept
+    endpoint (dei:EntityCommonStockSharesOutstanding).
+
+    The cover-page share count is the cleanest PIT size input: each value has a
+    ``filed`` date (when it became public), which we use as ts_available so a
+    market-cap built from it carries no lookahead.
+
+    Returns columns: symbol, ts_available (filed date), shares.
+    """
+    cik = ticker_to_cik(ticker)
+    if not cik:
+        logger.warning("No CIK for %s", ticker)
+        return pl.DataFrame()
+
+    url = (f"{SEC_BASE}/api/xbrl/companyconcept/CIK{str(cik).zfill(10)}"
+           "/dei/EntityCommonStockSharesOutstanding.json")
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.error("Shares-outstanding fetch failed for %s: %s", ticker, e)
+        return pl.DataFrame()
+
+    rows = []
+    for entry in data.get("units", {}).get("shares", []):
+        filed = entry.get("filed")
+        val = entry.get("val")
+        if filed and val:
+            rows.append({"symbol": ticker, "ts_available": filed, "shares": float(val)})
+
+    if not rows:
+        return pl.DataFrame()
+
+    return (
+        pl.DataFrame(rows)
+        .with_columns(pl.col("ts_available").str.strptime(pl.Datetime("us"), "%Y-%m-%d"))
+        # multiple filings can report the same date; keep the latest value
+        .unique(subset=["symbol", "ts_available"], keep="last")
+        .sort("ts_available")
+    )
+
+
+# ── Quarterly revenue (point-in-time, for fundamental momentum) ───
+_REVENUE_TAGS = [
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "Revenues",
+    "SalesRevenueNet",
+]
+
+
+def fetch_revenue_quarterly(ticker: str) -> pl.DataFrame:
+    """
+    Fetch reported revenue line items via XBRL company-concept (tries the common
+    revenue tags in order). Each row carries the period (start/end), the value,
+    fiscal year/period, and the SEC ``filed`` date (= when it became public, so
+    a feature stamped at ``filed`` has no lookahead).
+
+    Returns: symbol, start, end, val, fy, fp, filed, form  (raw; the quarterly
+    duration filter / YoY logic lives in research.features).
+    """
+    cik = ticker_to_cik(ticker)
+    if not cik:
+        return pl.DataFrame()
+
+    entries = None
+    for tag in _REVENUE_TAGS:
+        url = (f"{SEC_BASE}/api/xbrl/companyconcept/CIK{str(cik).zfill(10)}"
+               f"/us-gaap/{tag}.json")
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=30)
+        except Exception as e:
+            logger.error("Revenue fetch failed for %s/%s: %s", ticker, tag, e)
+            continue
+        if resp.status_code == 200:
+            entries = resp.json().get("units", {}).get("USD", [])
+            if entries:
+                break
+    if not entries:
+        logger.warning("No revenue concept found for %s", ticker)
+        return pl.DataFrame()
+
+    rows = []
+    for e in entries:
+        if e.get("form") not in ("10-Q", "10-K"):
+            continue
+        if not (e.get("start") and e.get("end") and e.get("filed")):
+            continue
+        rows.append({
+            "symbol": ticker,
+            "start": e["start"], "end": e["end"],
+            "val": float(e.get("val", 0) or 0),
+            "fy": e.get("fy"), "fp": e.get("fp"),
+            "filed": e["filed"], "form": e["form"],
+        })
+    if not rows:
+        return pl.DataFrame()
+    return pl.DataFrame(rows)
+
+
 # ── CIK Lookup ───────────────────────────────────────────────────
 def ticker_to_cik(ticker: str) -> str:
     """

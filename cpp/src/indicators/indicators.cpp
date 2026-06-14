@@ -66,8 +66,11 @@ void RSI::push(double price, double prev_price) {
 }
 
 std::optional<double> RSI::current() const {
+    // Flat series (no gains and no losses): RSI is undefined; return the
+    // neutral 50 rather than 100. (The old order returned 100 here because the
+    // avg_loss==0 check fired first, so the both-zero branch was dead code.)
+    if (avg_gain == 0.0 && avg_loss == 0.0) return 50.0;
     if (avg_loss == 0.0) return 100.0;
-    if (avg_gain == 0.0 && avg_loss == 0.0) return std::nullopt;
     double rs = avg_gain / avg_loss;
     return 100.0 - (100.0 / (1.0 + rs));
 }

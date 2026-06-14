@@ -104,27 +104,35 @@ void Portfolio::apply_fill(const Fill& fill) {
         [&](const Position& p) { return p.symbol == fill.symbol; });
 
     if (it != account_.positions.end()) {
-        // Adjust existing position
+        // Adjust existing position with average-cost accounting.
         double old_qty = it->quantity;
         double new_qty = old_qty + signed_quant;
+        bool same_dir = (old_qty >= 0) == (signed_quant >= 0);
 
-        if (std::abs(new_qty) < 1e-10) {
-            // Position closed
-            it->realized_pnl += (fill.price - it->avg_entry) * signed_quant;
-            account_.positions.erase(it);
-        } else {
-            // Average cost basis update
-            if ((old_qty > 0 && signed_quant > 0) || (old_qty < 0 && signed_quant < 0)) {
-                it->avg_entry = (it->avg_entry * old_qty + fill.price * signed_quant) / new_qty;
-            } else {
-                // Partial close: realized P&L
-                if (old_qty > 0) {
-                    it->realized_pnl += (fill.price - it->avg_entry) * -signed_quant;
-                } else {
-                    it->realized_pnl += (it->avg_entry - fill.price) * signed_quant;
-                }
-            }
+        if (same_dir) {
+            // Opening or adding: weighted-average entry over absolute sizes.
+            it->avg_entry = (it->avg_entry * std::abs(old_qty)
+                             + fill.price * std::abs(signed_quant))
+                            / std::abs(new_qty);
             it->quantity = new_qty;
+        } else {
+            // Opposite direction: realize P&L on the closed quantity. The old
+            // code computed this with the wrong sign on a full close
+            // (profitable long exits were booked as losses).
+            double closing = std::min(std::abs(signed_quant), std::abs(old_qty));
+            it->realized_pnl += (old_qty > 0)
+                ? (fill.price - it->avg_entry) * closing   // long: sold above cost = gain
+                : (it->avg_entry - fill.price) * closing;  // short: covered below cost = gain
+
+            if (std::abs(new_qty) < 1e-10) {
+                account_.positions.erase(it);              // flat
+            } else if ((old_qty >= 0) != (new_qty >= 0)) {
+                // Flipped through zero: remainder opens a new position.
+                it->quantity = new_qty;
+                it->avg_entry = fill.price;
+            } else {
+                it->quantity = new_qty;                    // partial close, basis unchanged
+            }
         }
     } else {
         // New position
@@ -159,7 +167,17 @@ void Portfolio::mark_to_market(const std::unordered_map<std::string, Price>& pri
 double Portfolio::equity() const { return account_.equity; }
 
 double Portfolio::buying_power() const {
-    return account_.cash + account_.equity * (1.0 - config_.margin_rate);
+    // Additional position notional the account can take on. With margin_rate as
+    // the initial-margin requirement, max gross exposure is equity / margin_rate.
+    // The old `cash + equity*(1 - margin_rate)` double-counted cash, because
+    // equity already includes cash.
+    double gross_notional = 0.0;
+    for (const auto& pos : account_.positions) {
+        gross_notional += std::abs(pos.quantity) * pos.last_price;
+    }
+    double mr = (config_.margin_rate > 0.0 && config_.margin_rate <= 1.0)
+                ? config_.margin_rate : 1.0;
+    return account_.equity / mr - gross_notional;
 }
 
 // ── SimulationEngine ─────────────────────────────────────────────
@@ -222,7 +240,7 @@ void SimulationEngine::step_bar(const std::string& symbol, const Bar& bar, Times
     // Run strategies
     for (auto& strategy : strategies_) {
         auto recent_bars = data_store_.bars_in_range(symbol, 0, ts);
-        auto signals = strategy.generate_signals(recent_bars, portfolio_.account());
+        auto signals = strategy.generate_signals(symbol, recent_bars, portfolio_.account());
 
         for (const auto& signal : signals) {
             // Simple signal → order translation (demo)
