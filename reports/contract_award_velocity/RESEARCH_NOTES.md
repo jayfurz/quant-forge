@@ -1,4 +1,4 @@
-# Research Notes — Contract Award Velocity (v3: powered-up)
+# Research Notes — Contract Award Velocity (v4: orthogonalized + size)
 
 **Date:** 2026-06-14
 **Branch:** `claude/research-h46cfx`
@@ -11,7 +11,52 @@ the longer sample changes the story.
 
 ---
 
-## v3 headline (read this first)
+## v4 headline — orthogonalization & contract size (read this first)
+
+Two questions: does the contract signal add anything **beyond momentum**, and
+does **contract size relative to the company** matter (the velocity *ratio* is
+scale-free and throws away dollar magnitude)?
+
+- **New size feature: `contract_intensity`** = trailing-12-month obligations ÷
+  market cap, where market cap uses **point-in-time shares outstanding** from
+  SEC `dei:EntityCommonStockSharesOutstanding` (`filed` date = ts_available, so
+  no lookahead). A $1B award is far more material to a small supplier than to a
+  prime; intensity captures that, velocity_z does not.
+- **New method: Fama–MacBeth** cross-sectional regression (`research.fama_macbeth`)
+  — per-period multivariate slopes averaged over non-overlapping periods, so a
+  feature with a positive *univariate* IC can still come out insignificant once
+  correlated features are controlled for.
+
+**Findings (8y):**
+- Of the three, **`contract_intensity` is the least-dead** — univariate 60d
+  IC 0.069, t **1.41**, long/short spread +2.9% — i.e. size-relative awards beat
+  the scale-free velocity ratio. But **1.41 < 2**: not significant.
+- **Velocity adds nothing over momentum** (Fama–MacBeth t ≈ 0 at every horizon).
+- **Nothing survives the multivariate** — in `forward ~ velocity + intensity +
+  momentum`, no slope reaches |t| ≳ 2 at any horizon (best is momentum 60d at
+  t 1.36). See `fama_macbeth.md`.
+
+**Verdict:** accounting for contract size helps (intensity > velocity), but
+neither contract feature is a statistically significant predictor, and neither
+adds robust incremental information beyond price momentum on this ~24-name
+universe over 8 years. Honest negative result, now stress-tested from three
+angles (univariate IC, size-adjustment, and orthogonalization).
+
+### v4 Fama–MacBeth (8y, t-stats)
+
+| model | horizon | velocity_z | intensity | momentum |
+|-------|--------:|-----------:|----------:|---------:|
+| all_three | 20d | +0.44 | +1.17 | −1.28 |
+| all_three | 60d | −0.56 | +0.15 | +1.36 |
+| all_three | 120d | −0.23 | −0.00 | +0.82 |
+
+(Caveat: PLTR shares not on the SEC dei tag → no intensity for it; intensity
+coverage ≈ 83% of stock-days. Market cap uses cover-page shares, which lag
+intraperiod buyback/issuance slightly.)
+
+---
+
+## v3 headline
 
 - **Better data source.** The feature now comes from USAspending's
   `spending_over_time` endpoint — **server-aggregated monthly obligation totals**,

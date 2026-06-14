@@ -1,0 +1,209 @@
+{
+  "velocity_vs_momentum_20d": {
+    "features": [
+      "contract_award_velocity_z",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "contract_award_velocity_z": {
+        "mean": -0.0303462911729151,
+        "t_stat": -0.17593612640247253,
+        "std": 1.6987773499697834
+      },
+      "price_momentum_63d": {
+        "mean": -0.08087170984847042,
+        "t_stat": -0.28533384226633385,
+        "std": 2.7914458521966776
+      }
+    },
+    "n_periods": 97,
+    "avg_r2": 0.15504774594789472,
+    "rebalance_days": 20
+  },
+  "intensity_vs_momentum_20d": {
+    "features": [
+      "contract_intensity",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "contract_intensity": {
+        "mean": 0.3125363679697362,
+        "t_stat": 1.1693160831182565,
+        "std": 2.632415897175729
+      },
+      "price_momentum_63d": {
+        "mean": -0.17299284555891423,
+        "t_stat": -0.6000961031390697,
+        "std": 2.8391818039234575
+      }
+    },
+    "n_periods": 97,
+    "avg_r2": 0.1734639464363767,
+    "rebalance_days": 20
+  },
+  "all_three_20d": {
+    "features": [
+      "contract_award_velocity_z",
+      "contract_intensity",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "contract_award_velocity_z": {
+        "mean": 0.07895783759337768,
+        "t_stat": 0.43978525024241966,
+        "std": 1.7682369164628238
+      },
+      "contract_intensity": {
+        "mean": 0.3618371883062878,
+        "t_stat": 1.1667016133320693,
+        "std": 3.054493946273515
+      },
+      "price_momentum_63d": {
+        "mean": -0.37664113516821474,
+        "t_stat": -1.2799927877759312,
+        "std": 2.8980514718557737
+      }
+    },
+    "n_periods": 97,
+    "avg_r2": 0.24132616387772632,
+    "rebalance_days": 20
+  },
+  "velocity_vs_momentum_60d": {
+    "features": [
+      "contract_award_velocity_z",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "contract_award_velocity_z": {
+        "mean": -0.2623784600173631,
+        "t_stat": -0.6209693347167641,
+        "std": 2.3901932407040287
+      },
+      "price_momentum_63d": {
+        "mean": 1.3461786820767805,
+        "t_stat": 1.3011271710739056,
+        "std": 5.852722752685901
+      }
+    },
+    "n_periods": 32,
+    "avg_r2": 0.15599571991859107,
+    "rebalance_days": 60
+  },
+  "intensity_vs_momentum_60d": {
+    "features": [
+      "contract_intensity",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "contract_intensity": {
+        "mean": 0.3374303518138957,
+        "t_stat": 0.7093220171404182,
+        "std": 2.691012365950961
+      },
+      "price_momentum_63d": {
+        "mean": 1.0840162342068655,
+        "t_stat": 1.0861577329134395,
+        "std": 5.645701038783222
+      }
+    },
+    "n_periods": 32,
+    "avg_r2": 0.14808589021081556,
+    "rebalance_days": 60
+  },
+  "all_three_60d": {
+    "features": [
+      "contract_award_velocity_z",
+      "contract_intensity",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "contract_award_velocity_z": {
+        "mean": -0.24522404616048665,
+        "t_stat": -0.5639320648603618,
+        "std": 2.4598648916056147
+      },
+      "contract_intensity": {
+        "mean": 0.09224852367577972,
+        "t_stat": 0.14629213123181714,
+        "std": 3.5670849058711274
+      },
+      "price_momentum_63d": {
+        "mean": 1.5479830805333559,
+        "t_stat": 1.3568513418863932,
+        "std": 6.453702330487583
+      }
+    },
+    "n_periods": 32,
+    "avg_r2": 0.1925021335151359,
+    "rebalance_days": 60
+  },
+  "velocity_vs_momentum_120d": {
+    "features": [
+      "contract_award_velocity_z",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "contract_award_velocity_z": {
+        "mean": -0.23466165352101093,
+        "t_stat": -0.29633550734936626,
+        "std": 3.167513142383648
+      },
+      "price_momentum_63d": {
+        "mean": 1.812853010371335,
+        "t_stat": 0.9012414137499463,
+        "std": 8.046026215454496
+      }
+    },
+    "n_periods": 16,
+    "avg_r2": 0.13892702365168713,
+    "rebalance_days": 120
+  },
+  "intensity_vs_momentum_120d": {
+    "features": [
+      "contract_intensity",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "contract_intensity": {
+        "mean": -0.13135138673767643,
+        "t_stat": -0.14385158473504786,
+        "std": 3.6524140343564557
+      },
+      "price_momentum_63d": {
+        "mean": 1.114815282476893,
+        "t_stat": 0.5459403392670212,
+        "std": 8.168037437743784
+      }
+    },
+    "n_periods": 16,
+    "avg_r2": 0.157616422883439,
+    "rebalance_days": 120
+  },
+  "all_three_120d": {
+    "features": [
+      "contract_award_velocity_z",
+      "contract_intensity",
+      "price_momentum_63d"
+    ],
+    "coefficients": {
+      "contract_award_velocity_z": {
+        "mean": -0.19531894430301966,
+        "t_stat": -0.23396048696814684,
+        "std": 3.339349252245519
+      },
+      "contract_intensity": {
+        "mean": -0.0038704947791052824,
+        "t_stat": -0.004038515607906501,
+        "std": 3.83358159768181
+      },
+      "price_momentum_63d": {
+        "mean": 1.5783096796274225,
+        "t_stat": 0.8177551443562724,
+        "std": 7.720206668316835
+      }
+    },
+    "n_periods": 16,
+    "avg_r2": 0.17663070123867497,
+    "rebalance_days": 120
+  }
+}

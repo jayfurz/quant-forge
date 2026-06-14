@@ -142,6 +142,52 @@ def fetch_insider_trades(cik: str) -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
+# ── Shares Outstanding (point-in-time) ───────────────────────────
+def fetch_shares_outstanding(ticker: str) -> pl.DataFrame:
+    """
+    Fetch point-in-time common shares outstanding via the XBRL company-concept
+    endpoint (dei:EntityCommonStockSharesOutstanding).
+
+    The cover-page share count is the cleanest PIT size input: each value has a
+    ``filed`` date (when it became public), which we use as ts_available so a
+    market-cap built from it carries no lookahead.
+
+    Returns columns: symbol, ts_available (filed date), shares.
+    """
+    cik = ticker_to_cik(ticker)
+    if not cik:
+        logger.warning("No CIK for %s", ticker)
+        return pl.DataFrame()
+
+    url = (f"{SEC_BASE}/api/xbrl/companyconcept/CIK{str(cik).zfill(10)}"
+           "/dei/EntityCommonStockSharesOutstanding.json")
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.error("Shares-outstanding fetch failed for %s: %s", ticker, e)
+        return pl.DataFrame()
+
+    rows = []
+    for entry in data.get("units", {}).get("shares", []):
+        filed = entry.get("filed")
+        val = entry.get("val")
+        if filed and val:
+            rows.append({"symbol": ticker, "ts_available": filed, "shares": float(val)})
+
+    if not rows:
+        return pl.DataFrame()
+
+    return (
+        pl.DataFrame(rows)
+        .with_columns(pl.col("ts_available").str.strptime(pl.Datetime("us"), "%Y-%m-%d"))
+        # multiple filings can report the same date; keep the latest value
+        .unique(subset=["symbol", "ts_available"], keep="last")
+        .sort("ts_available")
+    )
+
+
 # ── CIK Lookup ───────────────────────────────────────────────────
 def ticker_to_cik(ticker: str) -> str:
     """

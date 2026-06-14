@@ -168,3 +168,64 @@ def build_award_velocity(
         pl.lit("").alias("source_event_id"),
         pl.col("action_date").cast(pl.Datetime("us")).alias("asof_date"),
     ])
+
+
+def build_trailing_obligations(
+    obligations: pl.DataFrame,
+    window_days: int = 365,
+    reporting_lag_days: int = 45,
+    as_of: datetime | None = None,
+    feature_name: str = "contract_oblig_ttm",
+) -> pl.DataFrame:
+    """
+    Point-in-time trailing-window *dollar* obligations per symbol.
+
+    This is the raw *size* numerator that the velocity ratio deliberately throws
+    away. Combined with market cap downstream it gives "contract intensity"
+    (awards relative to firm size) — a $1B award is far more material to a
+    small-cap supplier than to a prime.
+
+    Input: [symbol, action_date, amount]. Returns the FeatureStore schema with
+    feature_value = trailing ``window_days`` obligation total (dollars).
+    """
+    if obligations.is_empty():
+        return pl.DataFrame()
+    as_of = as_of or datetime.now()
+
+    df = obligations
+    if df.schema.get("action_date") == pl.Utf8:
+        df = df.with_columns(
+            pl.col("action_date").str.slice(0, 10).str.strptime(pl.Date, strict=False)
+        )
+    else:
+        df = df.with_columns(pl.col("action_date").cast(pl.Date, strict=False))
+
+    df = df.drop_nulls(subset=["symbol", "action_date", "amount"]).filter(
+        pl.col("action_date") <= as_of.date()
+    )
+    if df.is_empty():
+        return pl.DataFrame()
+
+    daily = (
+        df.group_by(["symbol", "action_date"])
+        .agg(pl.col("amount").sum().alias("daily_amount"))
+        .sort(["symbol", "action_date"])
+        .with_columns(
+            pl.col("daily_amount")
+            .rolling_sum_by("action_date", window_size=f"{window_days}d")
+            .over("symbol")
+            .alias("ttm")
+        )
+        .filter(pl.col("ttm") > 0)
+    )
+
+    lag = pl.duration(days=reporting_lag_days)
+    return daily.select([
+        pl.col("symbol"),
+        (pl.col("action_date") + lag).cast(pl.Datetime("us")).alias("ts_available"),
+        pl.lit(feature_name).alias("feature_name"),
+        pl.col("ttm").alias("feature_value"),
+        pl.lit("usaspending_tx").alias("source"),
+        pl.lit("").alias("source_event_id"),
+        pl.col("action_date").cast(pl.Datetime("us")).alias("asof_date"),
+    ])

@@ -20,6 +20,7 @@ from research import (
     PointInTimeJoiner,
     SignalStudyRunner,
     build_award_velocity,
+    fama_macbeth,
     trailing_zscore,
 )
 
@@ -179,3 +180,24 @@ def test_study_runner_rejects_too_thin_universe():
     panel = _predictive_panel(n_sym=3)
     with pytest.raises(ValueError):
         SignalStudyRunner(panel).run("feat", "forward_20d_return", n_quantiles=5)
+
+
+# ── Fama–MacBeth ───────────────────────────────────────────────────
+def test_fama_macbeth_credits_true_feature_not_correlated_decoy():
+    rng = np.random.default_rng(0)
+    d0 = datetime(2018, 1, 1)
+    rows = []
+    for t in range(400):
+        date = d0 + timedelta(days=t)
+        for s in range(15):
+            true = rng.standard_normal()
+            decoy = 0.7 * true + 0.7 * rng.standard_normal()  # correlated, no own effect
+            fwd = 1.5 * true + rng.standard_normal() * 3
+            rows.append({"symbol": f"S{s}", "date": date,
+                         "true": true, "decoy": decoy, "forward_20d_return": fwd})
+    res = fama_macbeth(pl.DataFrame(rows), ["true", "decoy"], "forward_20d_return")
+    # the genuine driver is significant; the correlated decoy is not, once
+    # controlled for (even though it has a positive *univariate* IC)
+    assert res["coefficients"]["true"]["t_stat"] > 3.0
+    assert abs(res["coefficients"]["decoy"]["t_stat"]) < 2.0
+    assert res["rebalance_days"] == 20

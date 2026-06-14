@@ -36,6 +36,8 @@ from research import (
     ForwardReturnLabeler,
     SignalStudyRunner,
     build_award_velocity,
+    build_trailing_obligations,
+    fama_macbeth,
 )
 
 logging.basicConfig(
@@ -130,21 +132,56 @@ def build_contract_feature(
 
     # build_award_velocity treats each row as a dated obligation total; the
     # monthly month-end date is the natural action_date here.
-    features = build_award_velocity(
-        monthly.select(["symbol", pl.col("month").alias("action_date"), "amount"]),
-        recent_days=90,
-        baseline_days=730,
-        reporting_lag_days=reporting_lag_days,
+    obl = monthly.select(["symbol", pl.col("month").alias("action_date"), "amount"])
+
+    velocity = build_award_velocity(
+        obl, recent_days=90, baseline_days=730, reporting_lag_days=reporting_lag_days,
+    )
+    # Raw trailing-12-month dollar obligations — the "size" numerator that the
+    # velocity ratio discards (combined with market cap → contract intensity).
+    ttm = build_trailing_obligations(
+        obl, window_days=365, reporting_lag_days=reporting_lag_days,
     )
 
-    if features.is_empty():
-        logger.warning("build_award_velocity produced no rows")
-        return features
+    parts = [f for f in (velocity, ttm) if not f.is_empty()]
+    if not parts:
+        logger.warning("No contract features produced")
+        return pl.DataFrame()
 
-    logger.info("Built contract_award_velocity_z: %d rows for %d symbols",
-                 features.height, features["symbol"].n_unique())
-
+    features = pl.concat(parts, how="diagonal_relaxed")
+    logger.info("Built contract features: %d rows (%s)", features.height,
+                 ", ".join(features["feature_name"].unique().to_list()))
     return features
+
+
+def build_size_features(vendor_ticker_map: dict[str, str]) -> pl.DataFrame:
+    """
+    Fetch point-in-time shares outstanding (SEC dei cover-page count) for the
+    universe and emit it as a FeatureStore feature (`shares_outstanding`), so it
+    PIT-joins to bars like any other signal and lets us form market cap without
+    lookahead.
+    """
+    from downloaders.sec_edgar import fetch_shares_outstanding
+
+    frames = []
+    for ticker in vendor_ticker_map:
+        df = fetch_shares_outstanding(ticker)
+        if not df.is_empty():
+            frames.append(df)
+    if not frames:
+        logger.warning("No shares-outstanding data fetched")
+        return pl.DataFrame()
+
+    shares = pl.concat(frames, how="diagonal_relaxed")
+    return shares.select([
+        pl.col("symbol"),
+        pl.col("ts_available"),
+        pl.lit("shares_outstanding").alias("feature_name"),
+        pl.col("shares").alias("feature_value"),
+        pl.lit("sec_edgar").alias("source"),
+        pl.lit("").alias("source_event_id"),
+        pl.col("ts_available").alias("asof_date"),
+    ])
 
 
 def get_price_data(
@@ -191,6 +228,33 @@ def get_price_data(
     return combined
 
 
+def _write_fama_macbeth_md(path, fm_out: dict, horizons: list[int], models: dict):
+    """Render Fama–MacBeth coefficients/t-stats to a markdown table."""
+    lines = [
+        "# Fama–MacBeth — incremental predictive power",
+        "",
+        "Cross-sectional regression of forward return on standardized features,",
+        "averaged across non-overlapping periods. `t` is the Fama–MacBeth t-stat",
+        "(|t| ≳ 2 ⇒ the feature adds information beyond the others).",
+        "",
+    ]
+    for name, feats in models.items():
+        lines += [f"## {name}", "",
+                  "| horizon | n | " + " | ".join(feats) + " |",
+                  "|---|---|" + "|".join(["---"] * len(feats)) + "|"]
+        for h in horizons:
+            res = fm_out.get(f"{name}_{h}d")
+            if not res:
+                continue
+            cells = []
+            for f in feats:
+                c = res["coefficients"].get(f, {})
+                cells.append(f"b={c.get('mean', 0):+.3f}, t={c.get('t_stat', 0):+.2f}")
+            lines.append(f"| {h}d | {res['n_periods']} | " + " | ".join(cells) + " |")
+        lines.append("")
+    path.write_text("\n".join(lines) + "\n")
+
+
 def run_study(
     output_dir: str = "reports/contract_award_velocity",
     lookback_years: int = 3,
@@ -216,6 +280,12 @@ def run_study(
 
     store = FeatureStore("data/features")
     store.add_features(features)
+
+    # Size input: point-in-time shares outstanding (for market-cap-relative
+    # contract intensity).
+    size_feats = build_size_features(DEFENSE_UNIVERSE)
+    if not size_feats.is_empty():
+        store.add_features(size_feats)
 
     summary = store.feature_summary()
     logger.info("Feature store summary:\n%s", summary)
@@ -243,10 +313,14 @@ def run_study(
     logger.info("STEP 3: Point-in-time join (features → bars)")
     logger.info("=" * 60)
 
-    joiner = PointInTimeJoiner(store)
-    joined = joiner.join(defense_bars, feature_names=["contract_award_velocity_z"])
+    pit_features = ["contract_award_velocity_z", "contract_oblig_ttm",
+                    "shares_outstanding"]
+    pit_features = [f for f in pit_features if f in store.feature_names()]
 
-    coverage = joiner.join_summary(joined, ["contract_award_velocity_z"])
+    joiner = PointInTimeJoiner(store)
+    joined = joiner.join(defense_bars, feature_names=pit_features)
+
+    coverage = joiner.join_summary(joined, pit_features)
     logger.info("Feature coverage:\n%s", coverage)
 
     # ── 4. Forward returns ─────────────────────────────────────────
@@ -258,9 +332,9 @@ def run_study(
     labeler = ForwardReturnLabeler(horizons=horizons)
     labeled = labeler.compute(joined)
 
-    # ── 5. Build baseline (price momentum) ─────────────────────────
+    # ── 5. Build derived features (momentum + contract intensity) ──
     logger.info("=" * 60)
-    logger.info("STEP 5: Building baseline features")
+    logger.info("STEP 5: Building baseline + size features")
     logger.info("=" * 60)
 
     # 63-day price momentum as baseline
@@ -269,6 +343,25 @@ def run_study(
         .alias("price_momentum_63d")
     )
 
+    # Contract intensity = trailing-12m obligations / market cap. This is the
+    # "size of the contract relative to the company" signal — distinct from the
+    # velocity *ratio*, which is scale-free. Market cap uses PIT shares.
+    have_intensity = ("contract_oblig_ttm" in labeled.columns
+                      and "shares_outstanding" in labeled.columns)
+    if have_intensity:
+        labeled = labeled.with_columns(
+            (pl.col("close") * pl.col("shares_outstanding")).alias("market_cap")
+        ).with_columns(
+            pl.when(pl.col("market_cap") > 0)
+            .then(pl.col("contract_oblig_ttm") / pl.col("market_cap"))
+            .otherwise(None)
+            .alias("contract_intensity")
+        )
+        cov = labeled["contract_intensity"].drop_nulls().len()
+        logger.info("contract_intensity populated rows: %d / %d", cov, labeled.height)
+    else:
+        logger.warning("Missing oblig_ttm or shares — skipping contract_intensity")
+
     # ── 6. Run studies ─────────────────────────────────────────────
     logger.info("=" * 60)
     logger.info("STEP 6: Running signal studies")
@@ -276,33 +369,61 @@ def run_study(
 
     runner = SignalStudyRunner(labeled)
 
+    # Univariate studies per feature that exists.
+    univariate = ["contract_award_velocity_z", "price_momentum_63d"]
+    if have_intensity:
+        univariate.append("contract_intensity")
+
+    report_name = {
+        "contract_award_velocity_z": "velocity",
+        "price_momentum_63d": "momentum_baseline",
+        "contract_intensity": "intensity",
+    }
+
     for horizon in horizons:
         forward_col = f"forward_{horizon}d_return"
         logger.info("\n--- %s ---", forward_col)
+        for feat in univariate:
+            try:
+                rep = runner.run(feature_name=feat, forward_col=forward_col)
+            except ValueError as e:
+                logger.warning("  %s skipped: %s", feat, e)
+                continue
+            runner.save_report(rep, out / f"{report_name[feat]}_{horizon}d")
+            ic = rep["ic_summary"]
+            logger.info("  %-26s IC=%+.4f t=%+.2f spread=%+.3f%%",
+                         feat, ic["pearson_ic_mean"], ic["ic_t_stat"],
+                         rep["quintile_spread"]["mean_spread"])
 
-        # Primary feature
-        report = runner.run(
-            feature_name="contract_award_velocity_z",
-            forward_col=forward_col,
-        )
-        runner.save_report(report, out / f"velocity_{horizon}d")
+    # ── 6b. Orthogonalization (Fama–MacBeth) ───────────────────────
+    logger.info("=" * 60)
+    logger.info("STEP 6b: Fama–MacBeth — does contract info survive controls?")
+    logger.info("=" * 60)
 
-        # Baseline comparison (price momentum)
-        baseline = runner.run(
-            feature_name="price_momentum_63d",
-            forward_col=forward_col,
-        )
-        runner.save_report(baseline, out / f"momentum_baseline_{horizon}d")
+    fm_models = {
+        "velocity_vs_momentum": ["contract_award_velocity_z", "price_momentum_63d"],
+    }
+    if have_intensity:
+        fm_models["intensity_vs_momentum"] = ["contract_intensity", "price_momentum_63d"]
+        fm_models["all_three"] = [
+            "contract_award_velocity_z", "contract_intensity", "price_momentum_63d"
+        ]
 
-        # Print comparison
-        vs = report["quintile_spread"]
-        bs = baseline["quintile_spread"]
-        logger.info(
-            "  velocity_z spread: mean=%.3f%%, sharpe=%.2f | "
-            "momentum spread: mean=%.3f%%, sharpe=%.2f",
-            vs.get("mean_spread", 0), vs.get("sharpe", 0),
-            bs.get("mean_spread", 0), bs.get("sharpe", 0),
-        )
+    fm_out = {}
+    for horizon in horizons:
+        forward_col = f"forward_{horizon}d_return"
+        for name, feats in fm_models.items():
+            res = fama_macbeth(labeled, feats, forward_col=forward_col)
+            fm_out[f"{name}_{horizon}d"] = res
+            coefs = " | ".join(
+                f"{f}: b={c['mean']:+.3f} t={c['t_stat']:+.2f}"
+                for f, c in res["coefficients"].items()
+            )
+            logger.info("  [%s %dd, n=%d] %s", name, horizon, res["n_periods"], coefs)
+
+    import json
+    (out / "fama_macbeth.json").write_text(json.dumps(fm_out, indent=2, default=str))
+    _write_fama_macbeth_md(out / "fama_macbeth.md", fm_out, horizons, fm_models)
 
     # ── 7. Summary ─────────────────────────────────────────────────
     logger.info("=" * 60)
