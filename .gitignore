@@ -18,6 +18,7 @@ dist/
 data/raw/*
 data/clean/*
 data/market_data/*
+data/features/
 !data/raw/.gitkeep
 !data/clean/.gitkeep
 !data/market_data/.gitkeep
@@ -38,6 +39,11 @@ configs/local*.json
 
 # Secrets
 .env
+
+# Generated study artifacts — keep only the curated *.md summaries + notes,
+# drop the large regenerable per-period dumps (metrics.json, *.csv).
+reports/**/metrics.json
+reports/**/*.csv
 
 # Cache
 .pytest_cache/

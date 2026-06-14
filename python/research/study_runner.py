@@ -83,10 +83,14 @@ class SignalStudyRunner:
         # Drop rows where feature or forward return is null
         df = df.drop_nulls(subset=[feature_name, forward_col])
 
-        # Compute quantile bucket per period
+        # Compute quantile bucket per period.
+        # Rank ascending so the LOWEST feature value lands in Q1 and the
+        # HIGHEST in Q{n_quantiles}. This is the conventional decile/quintile
+        # convention and makes the Q{n}-Q1 spread a true top-minus-bottom
+        # long/short: its sign then agrees with the information coefficient.
         df = df.with_columns(
             pl.col(feature_name)
-            .rank("ordinal", descending=True)  # highest value = rank 1
+            .rank("ordinal", descending=False)  # lowest value = rank 1 = Q1
             .over(period_col)
             .alias("_rank")
         )
@@ -183,10 +187,14 @@ class SignalStudyRunner:
             sharpe = (spread_mean / spread_std * (252 ** 0.5)
                       if spread_std and spread_std > 0 else 0.0)
 
-            # Max drawdown of spread
-            cum = spread["cumulative_spread"]
+            # Max drawdown of the long/short equity curve. The curve is an
+            # ADDITIVE cumulative sum of per-period spreads (in % points), so
+            # drawdown is the peak-to-trough decline measured in those same
+            # % points — NOT divided by the running peak (which is near zero
+            # early on and produces meaningless multi-thousand-percent values).
+            cum = long_short["cumulative_spread"]
             peak = cum.cum_max()
-            dd = (cum - peak) / peak.abs() * 100
+            dd = cum - peak  # <= 0, in cumulative-spread percentage points
             max_dd = dd.min()
         else:
             sharpe = 0.0
@@ -300,8 +308,8 @@ class SignalStudyRunner:
             "## Spread (Q{n_quantiles} - Q1)".format(n_quantiles=meta["n_quantiles"]),
             "",
             f"- Mean spread: {spread['mean_spread']:.3f}%",
-            f"- Sharpe: {spread['sharpe']:.2f}",
-            f"- Max drawdown: {spread['max_drawdown_pct']:.1f}%",
+            f"- Sharpe: {spread['sharpe']:.2f}  _(overlapping windows — inflated; see notes)_",
+            f"- Max drawdown: {spread['max_drawdown_pct']:.1f} pp _(of cumulative spread)_",
             "",
             "## Information Coefficient",
             "",

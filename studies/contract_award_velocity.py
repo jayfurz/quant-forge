@@ -111,30 +111,26 @@ def build_contract_feature(
     cols = contracts.columns
     logger.info("Contract columns: %s", cols)
 
-    # The API returns various field names. Find the relevant ones.
-    amount_col = None
-    for candidate in ["Award Amount", "award_amount", "federal_action_obligation",
-                       "total_obligated_amount", "awarding_agency_name"]:
-        if candidate in cols:
-            if candidate != "awarding_agency_name":
-                amount_col = candidate
-                break
+    # The API returns various field names, and the downloader normalizes the
+    # raw "Award Amount"/"Recipient Name"/"Start Date" fields to snake_case
+    # (amount/vendor/start_date). Accept both so this works against either the
+    # raw USAspending payload or the downloader's normalized DataFrame.
+    def _first_present(candidates: list[str]) -> str | None:
+        return next((c for c in candidates if c in cols), None)
 
-    vendor_col = None
-    for candidate in ["Recipient Name", "recipient_name", "awardee_or_recipient_legal_entity_name"]:
-        if candidate in cols:
-            vendor_col = candidate
-            break
-
-    date_col = None
-    for candidate in ["Start Date", "start_date", "period_of_performance_start_date",
-                       "action_date", "award_date"]:
-        if candidate in cols:
-            date_col = candidate
-            break
-
-    agency_col = "Awarding Agency" if "Awarding Agency" in cols else (
-        "awarding_agency_name" if "awarding_agency_name" in cols else None)
+    amount_col = _first_present([
+        "amount", "Award Amount", "award_amount",
+        "federal_action_obligation", "total_obligated_amount",
+    ])
+    vendor_col = _first_present([
+        "vendor", "Recipient Name", "recipient_name",
+        "awardee_or_recipient_legal_entity_name",
+    ])
+    date_col = _first_present([
+        "start_date", "Start Date", "period_of_performance_start_date",
+        "action_date", "award_date",
+    ])
+    agency_col = _first_present(["agency", "Awarding Agency", "awarding_agency_name"])
 
     if not amount_col or not vendor_col or not date_col:
         logger.error("Cannot find required columns. Available: %s", cols)
@@ -179,7 +175,7 @@ def build_contract_feature(
             "feature_name": "contract_award_value",
             "feature_value": amount,
             "source": "usaspending",
-            "source_event_id": str(row.get("Award ID", row.get("award_id", ""))),
+            "source_event_id": str(row.get("award_id", row.get("Award ID", ""))),
             "asof_date": award_date,
             "agency": agency,
         })
