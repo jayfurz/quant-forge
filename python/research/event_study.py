@@ -72,13 +72,15 @@ class EventStudy:
             ar = sub["_ar"].to_numpy().astype(float)
             self._by_symbol[sym] = (d, ar)
 
-    def run(self, windows: list[tuple[int, int]] | None = None) -> dict:
-        if windows is None:
-            windows = [(-self.pre, -1), (0, 0), (1, 5), (1, 20), (1, self.post)]
+    def _collect(self):
+        """Per-event abnormal-return matrix (events × relative days) + metadata.
 
+        Returns (rel_days, M, info) where M[i, k] is the AR of event i on
+        relative day rel_days[k] (NaN if outside the price history), and info is
+        a list of {symbol, event_date, amount} aligned with M's rows.
+        """
         rel = np.arange(-self.pre, self.post + 1)
-        rows = []  # AR matrix, one row per usable event
-        amounts = []
+        rows, info = [], []
         for ev in self.events.iter_rows(named=True):
             sym = ev[self.symbol_col]
             entry = self._by_symbol.get(sym)
@@ -95,13 +97,38 @@ class EventStudy:
                 if 0 <= pos < len(dates):
                     line[k] = ar[pos]
             rows.append(line)
-            amounts.append(ev.get("amount", np.nan))
+            info.append({"symbol": sym, "event_date": ev[self.event_date_col],
+                         "amount": ev.get("amount", np.nan)})
+        M = np.vstack(rows) if rows else np.empty((0, rel.size))
+        return rel, M, info
 
-        if not rows:
-            return {"n_events": 0, "windows": {}, "caar": [], "rel_days": rel.tolist()}
+    def event_cars(self, windows: list[tuple[int, int]]) -> pl.DataFrame:
+        """One row per usable event with its CAR over each window (NaN if the
+        window runs past the available history). Enables external robustness
+        analysis (calendar clustering, size splits, out-of-sample)."""
+        rel, M, info = self._collect()
+        data = {
+            "symbol": [d["symbol"] for d in info],
+            "event_date": [d["event_date"] for d in info],
+            "amount": [d["amount"] for d in info],
+        }
+        for a, b in windows:
+            i0, i1 = a + self.pre, b + self.pre
+            sub = M[:, i0:i1 + 1]
+            complete = ~np.isnan(sub).any(axis=1)
+            car = np.where(complete, sub.sum(axis=1), np.nan)
+            data[f"car_{a}_{b}"] = car.tolist()
+        return pl.DataFrame(data)
 
-        M = np.vstack(rows)              # events × rel_days
-        amounts = np.array(amounts, dtype=float)
+    def run(self, windows: list[tuple[int, int]] | None = None) -> dict:
+        if windows is None:
+            windows = [(-self.pre, -1), (0, 0), (1, 5), (1, 20), (1, self.post)]
+
+        rel, M, info = self._collect()
+        amounts = np.array([d["amount"] for d in info], dtype=float)
+        if M.shape[0] == 0:
+            return {"n_events": 0, "windows": {}, "caar": [], "aar": [],
+                    "rel_days": rel.tolist(), "size_buckets": {}}
         aar = np.nanmean(M, axis=0)
         caar = np.nancumsum(aar)         # cumulative average abnormal return
 

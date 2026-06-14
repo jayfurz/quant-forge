@@ -79,3 +79,56 @@ next target.
 
 _Reproduce:_ `python studies/earnings_drift.py`
 
+---
+
+## Robustness gauntlet on the reversal (`studies/earnings_drift_robust.py`)
+
+The reversal got the full treatment that killed every prior "signal": calendar-
+clustered standard errors, a long/short P&L, a liquidity split, and an
+out-of-sample temporal split.
+
+**1. Calendar-clustered t (one obs per event-month).** This is where the contract
+event drift died (t=−5.2 → −1.9). The reversal mostly *survives* it:
+
+| component | naive t | clustered t |
+|-----------|--------:|------------:|
+| positive surprise, [1,20] | −2.06 | −1.97 |
+| negative surprise, [1,60] | +2.84 | **+3.24** |
+| **long/short reversal, [1,60]** | +1.90 | **+2.29** |
+| long/short reversal, [1,20] | +2.29 | +1.24 |
+
+So clustering doesn't explain it away — the 60-day reversal is real *in sample*
+(clustered t≈2.3, driven by decelerating-revenue names drifting **up**).
+
+**2. Out-of-sample (the decisive test) — it fails.** The entire effect is
+second-half-only:
+
+| half | LS [1,20] | LS [1,60] |
+|------|----------:|----------:|
+| 2018–2022 | +0.66 | **+0.59** |
+| 2022–2026 | +1.26 | **+2.71** |
+
+A stable effect should appear in both halves; this one is absent pre-2022 and
+concentrated post-2022 — regime-dependent, not dependable.
+
+**3. Liquidity — wrong sign for the behavioral story.** The reversal lives in
+*liquid* large caps (high-liquidity clustered t=+2.09) and is absent in the
+least-liquid tercile (−0.50). Overreaction-reversal is supposed to be strongest
+in illiquid names, so this looks more like a recent large-cap rotation than a
+behavioral mispricing.
+
+### Verdict
+The revenue-surprise reversal is the **strongest candidate the project found** —
+it's the only effect to survive calendar-clustering (clustered t≈2.3). But it
+**fails the out-of-sample split** (entirely post-2022) and has the wrong
+liquidity signature, so it is **not an established, tradeable edge** — it joins
+contract velocity, momentum, event drift, and contract intensity in the
+"dissolves under the right test" column. The pattern is now overwhelming: on
+these universes and this decade, every apparent signal is either an artifact or
+regime-specific. That consistency is itself the result — and the platform's
+gauntlet (PIT → non-overlap → orthogonalization → cluster-robust → OOS) reliably
+finds it.
+
+_Reproduce:_ `python studies/earnings_drift_robust.py`
+
+
