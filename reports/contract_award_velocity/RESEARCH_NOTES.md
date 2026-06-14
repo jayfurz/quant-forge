@@ -1,16 +1,52 @@
-# Research Notes — Contract Award Velocity (v2: rearchitected)
+# Research Notes — Contract Award Velocity (v3: powered-up)
 
 **Date:** 2026-06-14
 **Branch:** `claude/research-h46cfx`
 
-This is the second pass. v1 (below, "Appendix") got the flagship study *running*
-and exposed that even once it ran, both the signal and the harness were not to
-be trusted. v2 **fixes the bugs and rearchitects** the research stack and the
-C++ engine so the conclusion is actually believable.
+Three passes. v1 (Appendix) got the flagship study *running* and showed neither
+the signal nor the harness could be trusted. v2 fixed the bugs and rearchitected
+the research stack + C++ engine. **v3 closes the last gap from v2 — statistical
+power — by switching to a complete monthly data source and running 8 years**, and
+the longer sample changes the story.
 
 ---
 
-## TL;DR
+## v3 headline (read this first)
+
+- **Better data source.** The feature now comes from USAspending's
+  `spending_over_time` endpoint — **server-aggregated monthly obligation totals**,
+  complete and untruncated, one request per vendor. (The v2 transaction endpoint
+  truncated the oldest history for primes booking >5k transactions/year, which
+  would bias the trailing baseline.) Coverage jumped to **2,065 feature points /
+  21 names over 8 years**.
+- **Power test result:** with 8 years instead of 3, **neither signal is robust.**
+  Contract velocity is insignificant at every horizon (IC t = −1.75 / −0.07 /
+  0.46). And critically, **the momentum baseline's strong 3-year result did NOT
+  replicate** — its 120d IC t-stat collapsed from **3.15 (3y) → 0.19 (8y)**. The
+  v2 momentum "edge" was a small-sample / regime artifact, exactly the trap that
+  motivated the non-overlapping, t-stat-reporting rebuild.
+- **Takeaway:** on a ~24-name defense universe, neither contract-award
+  acceleration nor 63-day price momentum is a dependable cross-sectional
+  predictor once you measure it honestly over a full cycle. A negative result —
+  and a concrete demonstration of why 3-year backtests oversell.
+
+### v3 results (8y, live data 2026-06-14)
+
+| feature | horizon | periods | IC | IC t-stat | Sharpe (ann.) |
+|---------|--------:|--------:|---:|----------:|--------------:|
+| contract_award_velocity_z | 20d  | 100 | −0.040 | −1.75 | −0.66 |
+| | 60d  | 33 | −0.004 | −0.07 | −0.18 |
+| | 120d | 16 | 0.042 | 0.46 | 0.29 |
+| price_momentum_63d | 20d  | 97 | −0.025 | −0.80 | −0.14 |
+| | 60d  | 32 | 0.024 | 0.41 | 0.32 |
+| | 120d | 16 | 0.015 | **0.19** _(3y was 3.15)_ | −0.10 |
+
+The rest of this document (v2) describes the rearchitecture that made this
+honest measurement possible.
+
+---
+
+## TL;DR (v2 rearchitecture)
 
 - **Data, rebuilt point-in-time.** The feature is now built from
   **transaction-level** USAspending obligations (per-obligation `action_date` +
@@ -94,7 +130,11 @@ New module `python/research/features.py` (`build_award_velocity`,
 isolation. The study (`studies/contract_award_velocity.py`) is now a thin driver
 over it.
 
-### Results (live data, 2026-06-14)
+### Results — 3-year snapshot (superseded by the v3 8-year table above)
+
+> These were the first honest numbers and already showed the contract feature
+> had no significant edge. The momentum t=3.15 here is precisely the
+> small-sample result that v3 shows does **not** hold up over 8 years.
 
 | feature | horizon | IC | IC t-stat | Q5−Q1 | Sharpe (ann.) |
 |---------|--------:|---:|----------:|------:|--------------:|
@@ -158,8 +198,8 @@ The engine compiled but its build was blocked and its outputs were wrong.
 ## Reproduce
 
 ```bash
-# Python study (live data)
-python studies/contract_award_velocity.py --years 3 \
+# Python study (live data) — 8y for adequate power
+python studies/contract_award_velocity.py --years 8 \
     --out reports/contract_award_velocity --horizons 20,60,120
 python -m pytest python/tests -q
 

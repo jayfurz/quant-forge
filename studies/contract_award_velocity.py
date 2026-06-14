@@ -80,53 +80,58 @@ SECTOR_ETF = "ITA"  # iShares US Aerospace & Defense ETF (benchmark)
 def build_contract_feature(
     vendor_ticker_map: dict[str, str],
     lookback_years: int = 3,
-    reporting_lag_days: int = 30,
+    reporting_lag_days: int = 45,
 ) -> pl.DataFrame:
     """
-    Fetch transaction-level USAspending data and build a point-in-time
+    Fetch monthly USAspending obligation totals and build a point-in-time
     contract_award_velocity_z feature.
 
-    Uses the transaction endpoint (per-obligation ``action_date`` + amount)
-    rather than the award endpoint (cumulative current obligation stamped at a
-    single PoP-start date) — see reports/contract_award_velocity/RESEARCH_NOTES.md.
-    The actual velocity / trailing-z-score / reporting-lag logic lives in
+    Uses the ``spending_over_time`` endpoint (server-aggregated monthly
+    obligations, complete and untruncated) rather than the award endpoint
+    (cumulative current obligation stamped at a single PoP-start date — a
+    lookahead trap) or raw transaction pagination (which truncates the oldest
+    history for high-volume primes). See
+    reports/contract_award_velocity/RESEARCH_NOTES.md. The velocity /
+    trailing-z-score / reporting-lag logic lives in
     research.features.build_award_velocity so it is testable in isolation.
 
     Returns the FeatureStore schema:
         symbol, ts_available, feature_name, feature_value,
         source, source_event_id, asof_date
     """
-    from downloaders.gov_contracts import fetch_transactions_by_vendor
+    from downloaders.gov_contracts import fetch_monthly_obligations_by_vendor
 
     vendor_names = list(vendor_ticker_map.values())
     # Pull extra history so the trailing baseline window is warm by the time the
     # study's price sample starts.
     end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=(lookback_years + 2) * 365)).strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=(lookback_years + 3) * 365)).strftime("%Y-%m-%d")
 
-    logger.info("Fetching USAspending transactions for %d vendors (%s → %s)",
+    logger.info("Fetching USAspending monthly obligations for %d vendors (%s → %s)",
                  len(vendor_names), start_date, end_date)
 
-    tx = fetch_transactions_by_vendor(vendor_names, start_date, end_date)
+    monthly = fetch_monthly_obligations_by_vendor(vendor_names, start_date, end_date)
 
-    if tx.is_empty():
-        logger.warning("No transaction data returned from USAspending")
+    if monthly.is_empty():
+        logger.warning("No monthly obligation data returned from USAspending")
         return pl.DataFrame()
 
-    logger.info("Got %d contract transactions", tx.height)
+    logger.info("Got %d vendor-months", monthly.height)
 
     # Map the search-keyword vendor name → ticker (keyword == universe name).
     vendor_to_ticker = {v: k for k, v in vendor_ticker_map.items()}
-    tx = tx.with_columns(
+    monthly = monthly.with_columns(
         pl.col("vendor").replace_strict(vendor_to_ticker, default=None).alias("symbol")
     ).drop_nulls(subset=["symbol"])
 
-    if tx.is_empty():
-        logger.warning("No transactions mapped to universe tickers")
+    if monthly.is_empty():
+        logger.warning("No vendor-months mapped to universe tickers")
         return pl.DataFrame()
 
+    # build_award_velocity treats each row as a dated obligation total; the
+    # monthly month-end date is the natural action_date here.
     features = build_award_velocity(
-        tx.select(["symbol", "action_date", "amount"]),
+        monthly.select(["symbol", pl.col("month").alias("action_date"), "amount"]),
         recent_days=90,
         baseline_days=730,
         reporting_lag_days=reporting_lag_days,

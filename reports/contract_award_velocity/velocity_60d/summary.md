@@ -2,29 +2,29 @@
 
 **Target:** forward_60d_return
 **Rebalance:** 60d (non-overlapping)  |  **Periods/yr:** 4.2
-**Periods:** 12  |  **Symbols:** 18  |  **Obs:** 148
-**Date Range:** 2023-06-15 13:30:00 → 2026-02-03 14:30:00
+**Periods:** 33  |  **Symbols:** 24  |  **Obs:** 630
+**Date Range:** 2018-06-18 13:30:00 → 2026-02-06 14:30:00
 
 ## Quintile Returns
 
 | Q | Avg Return | Std | Hit Rate | N |
 |---|-----------|-----|----------|---|
-| Q1 | 3.352% | 10.704% | 69.4% | 36 |
-| Q2 | 10.888% | 26.091% | 66.7% | 30 |
-| Q3 | 7.332% | 22.293% | 67.9% | 28 |
-| Q4 | 7.770% | 17.926% | 63.3% | 30 |
-| Q5 | 7.980% | 15.702% | 79.2% | 24 |
+| Q1 | 5.477% | 24.868% | 59.1% | 137 |
+| Q2 | 3.539% | 14.458% | 63.3% | 128 |
+| Q3 | 5.322% | 19.639% | 59.2% | 125 |
+| Q4 | 3.987% | 18.417% | 58.6% | 128 |
+| Q5 | 4.913% | 22.848% | 63.4% | 112 |
 
 ## Spread (Q5 - Q1)
 
-- Mean spread: 4.628%
-- Sharpe (annualised): 0.77
-- Max drawdown: -24.9 pp _(of cumulative spread)_
+- Mean spread: -1.057%
+- Sharpe (annualised): -0.18
+- Max drawdown: -96.6 pp _(of cumulative spread)_
 
 ## Information Coefficient
 
-- Pearson IC mean: 0.1465
-- IC std: 0.4971
-- IC IR: 0.295
-- IC t-stat: 0.72  _(over 6 periods)_
-- IC positive: 83.3%
+- Pearson IC mean: -0.0035
+- IC std: 0.3051
+- IC IR: -0.011
+- IC t-stat: -0.07  _(over 33 periods)_
+- IC positive: 45.5%
