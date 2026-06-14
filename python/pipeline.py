@@ -17,9 +17,10 @@ Usage:
 import argparse
 import json
 import logging
-import sys
 from datetime import datetime
 from pathlib import Path
+
+import polars as pl
 
 logging.basicConfig(
     level=logging.INFO,
@@ -95,7 +96,6 @@ def run_pipeline(
 
     if vendor_names:
         try:
-            from polars import DataFrame as pl_DataFrame
             contract_data = fetch_defense_contracts_by_vendor(vendor_names, start_date, end_date)
             if not contract_data.is_empty():
                 velocity = contract_award_velocity(contract_data)
@@ -192,8 +192,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     symbols = [s.strip().upper() for s in args.symbols.split(",")]
-
-    # Lazy import polars only when needed
-    import polars as pl
 
     run_pipeline(symbols, args.start, args.end, args.cached)

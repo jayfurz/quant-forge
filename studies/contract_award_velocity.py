@@ -35,6 +35,7 @@ from research import (
     PointInTimeJoiner,
     ForwardReturnLabeler,
     SignalStudyRunner,
+    build_award_velocity,
 )
 
 logging.basicConfig(
@@ -79,185 +80,61 @@ SECTOR_ETF = "ITA"  # iShares US Aerospace & Defense ETF (benchmark)
 def build_contract_feature(
     vendor_ticker_map: dict[str, str],
     lookback_years: int = 3,
+    reporting_lag_days: int = 30,
 ) -> pl.DataFrame:
     """
-    Fetch USAspending data and build contract_award_velocity_z.
+    Fetch transaction-level USAspending data and build a point-in-time
+    contract_award_velocity_z feature.
 
-    Returns DataFrame with columns:
+    Uses the transaction endpoint (per-obligation ``action_date`` + amount)
+    rather than the award endpoint (cumulative current obligation stamped at a
+    single PoP-start date) — see reports/contract_award_velocity/RESEARCH_NOTES.md.
+    The actual velocity / trailing-z-score / reporting-lag logic lives in
+    research.features.build_award_velocity so it is testable in isolation.
+
+    Returns the FeatureStore schema:
         symbol, ts_available, feature_name, feature_value,
         source, source_event_id, asof_date
     """
-    from downloaders.gov_contracts import fetch_defense_contracts_by_vendor
+    from downloaders.gov_contracts import fetch_transactions_by_vendor
 
     vendor_names = list(vendor_ticker_map.values())
+    # Pull extra history so the trailing baseline window is warm by the time the
+    # study's price sample starts.
     end_date = datetime.now().strftime("%Y-%m-%d")
-    start_date = (datetime.now() - timedelta(days=lookback_years * 365)).strftime("%Y-%m-%d")
+    start_date = (datetime.now() - timedelta(days=(lookback_years + 2) * 365)).strftime("%Y-%m-%d")
 
-    logger.info("Fetching USAspending data for %d vendors (%s → %s)",
+    logger.info("Fetching USAspending transactions for %d vendors (%s → %s)",
                  len(vendor_names), start_date, end_date)
 
-    contracts = fetch_defense_contracts_by_vendor(vendor_names, start_date, end_date)
+    tx = fetch_transactions_by_vendor(vendor_names, start_date, end_date)
 
-    if contracts.is_empty():
-        logger.warning("No contract data returned from USAspending")
+    if tx.is_empty():
+        logger.warning("No transaction data returned from USAspending")
         return pl.DataFrame()
 
-    logger.info("Got %d contract awards", contracts.height)
+    logger.info("Got %d contract transactions", tx.height)
 
-    # Build vendor → ticker reverse map
+    # Map the search-keyword vendor name → ticker (keyword == universe name).
     vendor_to_ticker = {v: k for k, v in vendor_ticker_map.items()}
+    tx = tx.with_columns(
+        pl.col("vendor").replace_strict(vendor_to_ticker, default=None).alias("symbol")
+    ).drop_nulls(subset=["symbol"])
 
-    # Normalize column names - check what's actually available
-    cols = contracts.columns
-    logger.info("Contract columns: %s", cols)
-
-    # The API returns various field names, and the downloader normalizes the
-    # raw "Award Amount"/"Recipient Name"/"Start Date" fields to snake_case
-    # (amount/vendor/start_date). Accept both so this works against either the
-    # raw USAspending payload or the downloader's normalized DataFrame.
-    def _first_present(candidates: list[str]) -> str | None:
-        return next((c for c in candidates if c in cols), None)
-
-    amount_col = _first_present([
-        "amount", "Award Amount", "award_amount",
-        "federal_action_obligation", "total_obligated_amount",
-    ])
-    vendor_col = _first_present([
-        "vendor", "Recipient Name", "recipient_name",
-        "awardee_or_recipient_legal_entity_name",
-    ])
-    date_col = _first_present([
-        "start_date", "Start Date", "period_of_performance_start_date",
-        "action_date", "award_date",
-    ])
-    agency_col = _first_present(["agency", "Awarding Agency", "awarding_agency_name"])
-
-    if not amount_col or not vendor_col or not date_col:
-        logger.error("Cannot find required columns. Available: %s", cols)
+    if tx.is_empty():
+        logger.warning("No transactions mapped to universe tickers")
         return pl.DataFrame()
 
-    logger.info("Using columns: amount=%s, vendor=%s, date=%s",
-                 amount_col, vendor_col, date_col)
-
-    # Build feature rows
-    rows = []
-    for row in contracts.iter_rows(named=True):
-        vendor_name = str(row.get(vendor_col, "")).strip()
-        ticker = vendor_to_ticker.get(vendor_name)
-        if not ticker:
-            # Try partial match
-            for vn, tk in vendor_to_ticker.items():
-                if vn.lower() in vendor_name.lower():
-                    ticker = tk
-                    break
-        if not ticker:
-            continue
-
-        try:
-            amount = float(row.get(amount_col, 0) or 0)
-        except (ValueError, TypeError):
-            amount = 0.0
-
-        if amount <= 0:
-            continue
-
-        award_date_str = str(row.get(date_col, ""))
-        try:
-            award_date = datetime.strptime(award_date_str[:10], "%Y-%m-%d")
-        except (ValueError, TypeError):
-            continue
-
-        agency = str(row.get(agency_col, "")) if agency_col else ""
-
-        rows.append({
-            "symbol": ticker,
-            "ts_available": award_date,
-            "feature_name": "contract_award_value",
-            "feature_value": amount,
-            "source": "usaspending",
-            "source_event_id": str(row.get("award_id", row.get("Award ID", ""))),
-            "asof_date": award_date,
-            "agency": agency,
-        })
-
-    if not rows:
-        logger.warning("No mapped contract rows after vendor matching")
-        return pl.DataFrame()
-
-    raw = pl.DataFrame(rows)
-
-    # ── Build contract_award_velocity_z ────────────────────────────
-    # For each ticker, compute rolling 90-day award total
-    # Then normalize: velocity = 90d_total / trailing_2yr_avg_90d
-    raw = raw.sort(["symbol", "ts_available"])
-
-    # Aggregate daily award totals per symbol
-    daily_awards = raw.group_by(["symbol", "ts_available"]).agg(
-        pl.col("feature_value").sum().alias("daily_total")
-    ).sort(["symbol", "ts_available"])
-
-    # Rolling 90-day sum per symbol
-    daily_awards = daily_awards.with_columns(
-        pl.col("daily_total")
-        .rolling_sum(window_size=90, min_periods=1)
-        .over("symbol")
-        .alias("rolling_90d_sum"),
-        pl.col("daily_total")
-        .rolling_sum(window_size=730, min_periods=1)
-        .over("symbol")
-        .alias("rolling_2yr_sum"),
+    features = build_award_velocity(
+        tx.select(["symbol", "action_date", "amount"]),
+        recent_days=90,
+        baseline_days=730,
+        reporting_lag_days=reporting_lag_days,
     )
 
-    # Average 90-day award over 2 years = rolling_2yr_sum / (730/90) = rolling_2yr_sum / 8.11
-    # Actually: avg 90-day total = total 2yr / (2*365/90) ≈ total_2yr / 8.11
-    # Let's use rolling mean over 730 days as a simpler approach
-    daily_averages = daily_awards.with_columns(
-        pl.col("daily_total")
-        .rolling_mean(window_size=730, min_periods=90)
-        .over("symbol")
-        .alias("trailing_2yr_avg")
-    )
-
-    # velocity = 90d / trailing 2yr average
-    velocity = daily_averages.with_columns(
-        (pl.col("rolling_90d_sum") / pl.col("trailing_2yr_avg"))
-        .alias("velocity_raw")
-    )
-
-    # Replace inf/nan
-    velocity = velocity.with_columns(
-        pl.when(pl.col("velocity_raw").is_infinite())
-        .then(pl.lit(None, dtype=pl.Float64))
-        .when(pl.col("velocity_raw").is_nan())
-        .then(pl.lit(None, dtype=pl.Float64))
-        .otherwise(pl.col("velocity_raw"))
-        .alias("velocity_raw")
-    )
-
-    # Z-score normalize per ticker
-    velocity = velocity.with_columns([
-        pl.col("velocity_raw").mean().over("symbol").alias("_mean"),
-        pl.col("velocity_raw").std().over("symbol").alias("_std"),
-    ])
-
-    velocity = velocity.with_columns(
-        ((pl.col("velocity_raw") - pl.col("_mean")) / pl.col("_std"))
-        .alias("contract_award_velocity_z")
-    )
-
-    # Drop rows where velocity_z is null (not enough history)
-    velocity = velocity.drop_nulls(subset=["contract_award_velocity_z"])
-
-    # Build final feature DataFrame
-    features = velocity.select([
-        pl.col("symbol"),
-        pl.col("ts_available"),
-        pl.lit("contract_award_velocity_z").alias("feature_name"),
-        pl.col("contract_award_velocity_z").alias("feature_value"),
-        pl.lit("usaspending").alias("source"),
-        pl.lit("").alias("source_event_id"),
-        pl.col("ts_available").alias("asof_date"),
-    ])
+    if features.is_empty():
+        logger.warning("build_award_velocity produced no rows")
+        return features
 
     logger.info("Built contract_award_velocity_z: %d rows for %d symbols",
                  features.height, features["symbol"].n_unique())

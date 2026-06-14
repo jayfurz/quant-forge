@@ -11,11 +11,11 @@ endif()
 add_compile_options(-Wall -Wextra -Wpedantic)
 
 # ── Dependencies ──────────────────────────────────────────────────
-find_package(fmt REQUIRED)
-find_package(nlohmann_json REQUIRED)
-find_package(SQLite3 REQUIRED)
-
-# Optionally find DuckDB, fallback to SQLite
+# fmt / nlohmann_json / SQLite3 were declared REQUIRED but are not referenced
+# by any compiled source — they only served to block the build on machines
+# that lack them (and even when found, FindSQLite3 here exposes no usable
+# imported target). The engine is pure C++ standard library, so we keep the
+# default build dependency-free. DuckDB stays optional for future storage work.
 find_package(DuckDB QUIET)
 
 # ── Core Library (consolidated sources) ──────────────────────────
@@ -28,7 +28,6 @@ add_library(quant_forge_core STATIC
     cpp/src/strategies/momentum_ema_hysteresis.cpp
 )
 target_include_directories(quant_forge_core PUBLIC cpp/include)
-target_link_libraries(quant_forge_core PUBLIC fmt::fmt nlohmann_json::nlohmann_json SQLite3::SQLite3)
 if(DuckDB_FOUND)
     target_link_libraries(quant_forge_core PUBLIC DuckDB::DuckDB)
     target_compile_definitions(quant_forge_core PUBLIC HAS_DUCKDB)

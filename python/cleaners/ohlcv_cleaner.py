@@ -41,16 +41,19 @@ def clean_ohlcv(df: pl.DataFrame, symbol: str = "") -> pl.DataFrame:
     if "volume" in df.columns:
         df = df.with_columns(pl.col("volume").fill_null(0))
 
-    # Outlier flagging (without modifying data)
-    for col in ["open", "high", "low", "close"]:
-        if col in df.columns and df[col].drop_nulls().len() > 0:
-            mean = df[col].mean()
-            std = df[col].std()
-            if std and std > 0:
-                outlier_mask = (pl.col(col) - mean).abs() > 10 * std
-                outlier_count = df.filter(outlier_mask).height
-                if outlier_count > 0:
-                    logger.warning("%s: %d outlier %s values (>10σ)", symbol, outlier_count, col)
+    # Outlier flagging (without modifying data). Flag on daily *returns*, not
+    # raw price level — a trending stock drifts many σ from its mean price
+    # while never making an anomalous single-day move, so a price-level test
+    # both misses real jumps and false-flags healthy trends.
+    if "close" in df.columns and df["close"].drop_nulls().len() > 2:
+        rets = df["close"].pct_change()
+        mean = rets.mean()
+        std = rets.std()
+        if std and std > 0:
+            outlier_count = rets.filter((rets - mean).abs() > 10 * std).len()
+            if outlier_count > 0:
+                logger.warning("%s: %d daily return outliers (>10σ) — possible "
+                               "splits/bad ticks", symbol, outlier_count)
 
     # Add helper columns
     if "ts" in df.columns:
@@ -84,7 +87,13 @@ def align_to_trading_calendar(
     all_dates = pl.date_range(
         min_date, max_date, interval="1d", eager=True
     )
-    all_dates = all_dates.filter(all_dates.dt.weekday() < 5)  # Mon-Fri only
+    # polars dt.weekday() is 1=Monday … 7=Sunday, so Mon–Fri is 1..5.
+    # (The old `< 5` test silently dropped every Friday.)
+    all_dates = all_dates.filter(all_dates.dt.weekday() <= 5)  # Mon-Fri only
+
+    # date_range yields a Date; match the source column's dtype (often
+    # Datetime) so the join keys are compatible.
+    all_dates = all_dates.cast(df.schema[date_column])
 
     date_df = pl.DataFrame({date_column: all_dates})
 

@@ -67,7 +67,12 @@ private:
     const SimulationConfig& config_;
 };
 
+// The engine evaluates strategies once per (symbol, bar). `symbol` identifies
+// which instrument `recent_bars` belongs to — without it a multi-symbol
+// strategy cannot keep per-symbol state and ends up cross-contaminating
+// signals across instruments.
 using StrategyFunc = std::function<std::vector<Signal>(
+    const std::string& symbol,
     const std::vector<Bar>& recent_bars,
     const Account& account
 )>;

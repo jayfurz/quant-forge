@@ -1,28 +1,30 @@
 # Signal Study: contract_award_velocity_z
 
 **Target:** forward_120d_return
-**Periods:** 631  |  **Symbols:** 23  |  **Obs:** 4350
-**Date Range:** 2023-06-15 13:30:00 → 2025-12-18 14:30:00
+**Rebalance:** 120d (non-overlapping)  |  **Periods/yr:** 2.1
+**Periods:** 6  |  **Symbols:** 12  |  **Obs:** 70
+**Date Range:** 2023-06-15 13:30:00 → 2025-11-05 14:30:00
 
 ## Quintile Returns
 
 | Q | Avg Return | Std | Hit Rate | N |
 |---|-----------|-----|----------|---|
-| Q1 | 14.805% | 29.868% | 71.3% | 1262 |
-| Q2 | 15.644% | 31.739% | 70.5% | 1262 |
-| Q3 | 14.104% | 29.192% | 70.8% | 1220 |
-| Q4 | 13.489% | 30.019% | 66.7% | 555 |
-| Q5 | 21.729% | 48.317% | 58.8% | 51 |
+| Q1 | 4.958% | 20.067% | 61.1% | 18 |
+| Q2 | 20.312% | 28.686% | 75.0% | 12 |
+| Q3 | 29.959% | 57.933% | 75.0% | 16 |
+| Q4 | 17.811% | 24.398% | 75.0% | 12 |
+| Q5 | 6.722% | 14.204% | 83.3% | 12 |
 
 ## Spread (Q5 - Q1)
 
-- Mean spread: 7.813%
-- Sharpe: 2.32  _(overlapping windows — inflated; see notes)_
-- Max drawdown: -235.7 pp _(of cumulative spread)_
+- Mean spread: 1.763%
+- Sharpe (annualised): 0.25
+- Max drawdown: -10.9 pp _(of cumulative spread)_
 
 ## Information Coefficient
 
-- Pearson IC mean: 0.0045
-- IC std: 0.4388
-- IC IR: 0.010
-- IC positive: 52.6%
+- Pearson IC mean: 0.0000
+- IC std: 0.0000
+- IC IR: 0.000
+- IC t-stat: 0.00  _(over 0 periods)_
+- IC positive: 0.0%

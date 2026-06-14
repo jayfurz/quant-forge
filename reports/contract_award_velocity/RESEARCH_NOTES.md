@@ -1,228 +1,184 @@
-# Research Notes — Contract Award Velocity Signal Study
+# Research Notes — Contract Award Velocity (v2: rearchitected)
 
 **Date:** 2026-06-14
 **Branch:** `claude/research-h46cfx`
-**Scope:** Get the flagship signal study running on real data, report what it
-actually shows, and audit the methodology hard enough to know whether to trust it.
+
+This is the second pass. v1 (below, "Appendix") got the flagship study *running*
+and exposed that even once it ran, both the signal and the harness were not to
+be trusted. v2 **fixes the bugs and rearchitects** the research stack and the
+C++ engine so the conclusion is actually believable.
 
 ---
 
 ## TL;DR
 
-1. **The study had never run.** Three independent breaking bugs sat between the
-   downloader and the study runner. I fixed all three; the pipeline now runs
-   end-to-end on live Yahoo Finance + USAspending data.
-2. **Two more bugs were silently corrupting the numbers** even once it ran: an
-   inverted quintile sign convention (reported long/short spreads with the wrong
-   sign) and a drawdown formula that produced values like **−571,992%**. Both fixed.
-3. **The headline signal does not work.** With the math corrected,
-   `contract_award_velocity_z` has an information coefficient of essentially
-   **zero** (IC ≈ 0.002–0.014, IC-IR ≈ 0.01, positive ~50% of months — a coin flip).
-   The price-momentum baseline, by contrast, shows a real cross-sectional effect.
-4. **Even the "it doesn't work" conclusion is only provisional**, because the
-   feature construction still contains lookahead and data-validity problems that
-   I documented but deliberately did *not* paper over. A clean verdict needs the
-   v2 fixes listed at the end.
-
-This is an honest negative result on the signal plus a set of correctness fixes
-to the research harness itself.
-
----
-
-## What I set out to do
-
-The repo ships a research framework (`FeatureStore` → `PointInTimeJoiner` →
-`ForwardReturnLabeler` → `SignalStudyRunner`) and one flagship study,
-`studies/contract_award_velocity.py`. The hypothesis: acceleration in public
-defense-contract awards predicts forward returns for defense/aerospace stocks
-relative to the sector ETF (`ITA`).
-
-I ran it. It didn't work — not "no signal," but "doesn't execute." So step one
-became making it actually produce a number.
+- **Data, rebuilt point-in-time.** The feature is now built from
+  **transaction-level** USAspending obligations (per-obligation `action_date` +
+  amount, paginated) instead of award-level *current cumulative* totals stamped
+  at a single PoP-start date. 37k transactions → **5,542 feature points across
+  23 names** (v1: 100 points / 13 names), with a reporting-lag-adjusted
+  `ts_available`.
+- **Lookahead removed.** Velocity normalisation is now a **trailing/expanding
+  z-score** (was full-sample) and the rolling windows are **calendar-based**
+  (`90d` / `730d`) instead of row-count based.
+- **Statistics, made honest.** The study runner samples **non-overlapping**
+  rebalance dates, annualises by the rebalance frequency (not √252), reports an
+  **IC t-stat**, balances quantile buckets per period, and skips periods too
+  thin to sort. Sharpe figures dropped from a fantasy 5–10 to a sane 0.2–1.3.
+- **Verdict (unchanged, now credible): the contract-velocity feature has no
+  statistically significant edge.** Its IC t-stats are 1.1 / 0.7 / 0.0 across
+  20/60/120d — all below the |t|≈2 bar. A plain 63-day price-momentum baseline
+  is the only thing that clears it (120d IC 0.28, **t = 3.15**).
+- **C++ engine: builds and is correct enough to trust its metrics.** The build
+  no longer requires unused libraries; the metrics layer (daily returns,
+  Sortino, win rate, profit factor, trade P&L) was rewritten from real
+  round-trip accounting; and the strategy no longer cross-contaminates signals
+  across symbols.
 
 ---
 
-## Part 1 — Three breaking bugs (the study had never run)
+## Part 1 — Bugs fixed
 
-### Bug 1: Yahoo downloader is rate-limited into uselessness
-`downloaders/ohlcv.py` sent `User-Agent: QuantForge/0.1`. Yahoo's v8 chart API
-returns **HTTP 429** to any non-browser UA, so *every* price download failed.
+### Breaking (the study could not run / produce output)
+1. **Yahoo downloader** used a bot User-Agent → HTTP 429 on every request.
+   Now uses a browser UA with exponential-backoff retry.
+2. **Downloader↔study column mismatch** — study looked for `"Award Amount"`,
+   downloader emitted `amount`. (Superseded in v2 by the transaction path.)
+3. **`KeyError` in the drawdown calc** — read `cumulative_spread` from the
+   wrong frame.
 
-**Fix:** present a standard desktop-browser User-Agent and retry 429s with
-exponential backoff. Side effect: the repo's own `test_pipeline.py` live Yahoo
-test, which presumably also failed before, now passes (AAPL → 81 bars).
+### Correctness (ran, but wrong numbers)
+4. **Inverted quintile sign** — ranked descending so Q1 was the *top* bucket,
+   making the reported "Q5−Q1" spread the negative of the truth. Now ranks
+   ascending; spread sign agrees with IC.
+5. **Drawdown ÷ near-zero peak** produced values like −571,992%. Now additive
+   peak-to-trough in cumulative-spread points.
+6. **PIT join dropped pre-window features** — `query_range` lower-bounded by the
+   first bar date, so a feature available *before* the first bar (still the
+   valid carry-forward value) was clipped out, leaving early bars null. Now
+   queries all history up to the last bar. *(Caught by a regression test.)*
+7. **IC NaN poisoning** — `pl.corr` returns NaN (not null) for thin periods;
+   `drop_nulls` missed it, so mean IC came out NaN. Now filters NaN and handles
+   empty IC frames.
+8. **Cleaner dropped Fridays** — `dt.weekday() < 5` (polars weekday is 1–7).
+   Now `<= 5`. Also `align_to_trading_calendar` join crashed on Datetime vs
+   Date keys; dtype is now matched.
+9. **Cleaner outliers** flagged on raw price *level* (meaningless for a trend);
+   now on daily returns.
+10. **`signal_builder`** `'expected' in dir()` hack and a duplicate
+    `RISK_SEVERITY` key; **`pipeline.py`** imported `polars` only under
+    `__main__` so `run_pipeline()` broke on import.
 
-### Bug 2: column-name contract mismatch (downloader ↔ study)
-`gov_contracts.fetch_defense_contracts` normalizes the USAspending payload to
-snake_case (`amount`, `vendor`, `start_date`). But `build_contract_feature`
-looked for `"Award Amount"`, `"Recipient Name"`, etc. The lookup always failed:
-
-```
-[ERROR] Cannot find required columns. Available:
-['vendor','award_id','agency','description','amount',...]
-[ERROR] No features generated.
-```
-
-**Fix:** accept both the raw and normalized field names.
-
-### Bug 3: `KeyError` in the drawdown calc
-`SignalStudyRunner.run` read `spread["cumulative_spread"]`, but that column is
-only added to the `long_short` frame:
-
-```
-polars.exceptions.ColumnNotFoundError: "cumulative_spread" not found
-```
-
-**Fix:** read from `long_short`.
-
-> The absence of any `reports/` directory in the repo history corroborates that
-> these three bugs meant the study had produced output **zero times** before now.
-
----
-
-## Part 2 — Two analytical-correctness bugs (wrong numbers, no crash)
-
-These didn't stop execution; they quietly produced misleading results.
-
-### Bug 4: inverted quintile sign convention
-The runner ranked features `descending=True` (so Q1 = highest value) but then
-computed the long/short spread as `Q5 − Q1` and labeled Q5 the "top." The result
-contradicted itself: the momentum baseline had **positive IC (+0.19)** but a
-**negative reported spread (−12.7%)** — impossible if the labels meant what they
-said. The reported spread was actually *bottom minus top*.
-
-**Fix:** rank ascending (Q1 = lowest, Q5 = highest, conventional), so `Q5 − Q1`
-is a true top-minus-bottom long/short whose sign agrees with the IC. After the
-fix, momentum's spread flips to **+14.9%**, consistent with its +0.19 IC.
-
-### Bug 5: drawdown formula divides by a near-zero peak
-The long/short equity curve is an *additive* cumulative sum of per-period
-spreads. The old code computed `(cum − peak) / peak.abs()`, but early in the
-series the running peak is ~0, so the division exploded:
-
-| horizon | old "max drawdown" | corrected (pp of cum. spread) |
-|--------:|-------------------:|------------------------------:|
-| 20d     | −3,160%            | small |
-| 60d     | −7,220%            | moderate |
-| 120d    | −571,993%          | −235 to −820 pp |
-
-**Fix:** report drawdown as peak-to-trough in cumulative-spread percentage points
-(additive series), not as a fraction of a near-zero peak.
+### C++ (see Part 3)
+Build deps, daily-returns off-by-one, Sortino denominator, win-rate/profit-factor
+nonsense, realized-P&L sign on closes, buying-power double-count, RSI flat-series,
+and the strategy cross-symbol contamination.
 
 ---
 
-## Part 3 — Results (after all five fixes)
+## Part 2 — Research-stack rearchitecture
 
-Universe: 25 defense primes/suppliers, benchmark `ITA`, 3-year lookback.
-Live data pulled 2026-06-14.
+| Concern | Before | After |
+|--------|--------|-------|
+| Contract data | award-level, top-100-by-$, cumulative total @ PoP start | **transaction-level**, paginated, per-obligation `action_date` |
+| Availability | `ts_available` = PoP start (1984–2028!) | `action_date + reporting_lag` (default 30d) |
+| Normalisation | full-sample per-symbol z-score (lookahead) | **trailing/expanding** z-score (`research.features.trailing_zscore`) |
+| Rolling windows | row-count (`window_size=90` rows) | **calendar** (`rolling_sum_by("action_date","90d")`) |
+| Periods | every bar (overlapping → inflated stats) | **non-overlapping** rebalance sampling |
+| Annualisation | √252 always | √(252 / rebalance_days) |
+| Significance | IC-IR only | IC **t-stat** + n_periods |
+| Quantiles | global rank → unequal buckets | per-period balanced buckets + thin-period guard |
 
-| feature | horizon | obs | IC (mean) | IC-IR | IC>0 % | Q5−Q1 spread | "Sharpe"* |
-|---------|--------:|----:|----------:|------:|-------:|-------------:|----------:|
-| **contract_award_velocity_z** | 20d  | 5,064 | 0.0017 | 0.004 | 50.2% | +0.83% | 0.94 |
-| | 60d  | 4,774 | 0.0135 | 0.031 | 52.4% | +3.40% | 1.97 |
-| | 120d | 4,350 | 0.0045 | 0.010 | 52.6% | +7.81% | 2.32 |
-| **price_momentum_63d** (baseline) | 20d  | 16,032 | −0.0101 | −0.031 | 42.2% | +0.78% | 1.28 |
-| | 60d  | 15,072 | 0.1070 | 0.360 | 62.6% | +6.24% | 5.82 |
-| | 120d | 13,632 | 0.1946 | 0.691 | 72.9% | +14.95% | 9.58 |
+New module `python/research/features.py` (`build_award_velocity`,
+`trailing_zscore`) holds the PIT feature logic so it is unit-testable in
+isolation. The study (`studies/contract_award_velocity.py`) is now a thin driver
+over it.
 
-\* The "Sharpe" column is annualized from daily, **overlapping** forward-return
-windows and is badly inflated — see Caveat C. Use it only to compare signals on
-equal footing, not as a tradable expectation.
+### Results (live data, 2026-06-14)
 
-### Reading the table
+| feature | horizon | IC | IC t-stat | Q5−Q1 | Sharpe (ann.) |
+|---------|--------:|---:|----------:|------:|--------------:|
+| contract_award_velocity_z | 20d  | 0.071 | 1.09 | +2.02% | 1.06 |
+| | 60d  | 0.147 | 0.72 | +4.63% | 0.77 |
+| | 120d | 0.000 | 0.00 | +1.76% | 0.25 |
+| price_momentum_63d (baseline) | 20d  | 0.003 | 0.05 | +2.05% | 0.80 |
+| | 60d  | 0.092 | 0.93 | +6.04% | 0.66 |
+| | 120d | **0.283** | **3.15** | **+18.41%** | 1.28 |
 
-- **The contract signal has no edge.** IC ≈ 0 at every horizon, IC-IR ≈ 0.01,
-  and it's positive ~50% of months — indistinguishable from noise. The
-  superficially "nice" +7.8% 120d spread is an artifact: the Q5 bucket holds only
-  **51 of 4,350 observations** (the feature is far too sparse to quintile-sort —
-  see Caveat B), so that bucket's mean is dominated by a handful of names.
-- **Momentum is real here, directionally.** Clean monotonic quintiles
-  (Q1 11.1% → Q5 26.0% at 120d), IC +0.19, IC-IR 0.69, positive 73% of months.
-  Cross-sectional momentum within defense names carried information over this
-  sample. (Magnitudes still inflated by overlapping windows.)
+**Interpretation.** None of the contract-velocity t-stats reach significance.
+The richer transaction-level feature is real and PIT-clean, but on this 3-year,
+~23-name defense universe sampled non-overlapping there simply aren't enough
+independent observations to distinguish its IC from zero — and what edge momentum
+shows (120d, t=3.15) the contract feature does not add to. Honest answer: **not a
+tradable standalone signal on this sample.**
 
-So on a like-for-like basis, the proposed alternative-data feature is **beaten
-by, and adds nothing to, a trivial price-only baseline.**
-
----
-
-## Part 4 — Caveats I did NOT fix (why the verdict is still "provisional")
-
-A negative result is only credible if the test was fair. These remain, and each
-biases the feature's apparent quality — mostly *upward*, which makes the ~0 IC
-even more damning, but they must be fixed before any v2 claim:
-
-### Caveat A — lookahead in the feature value itself
-1. **Full-sample z-score.** `build_contract_feature` normalizes velocity with the
-   mean/std computed over the *entire* history per ticker
-   (`.mean().over("symbol")`), including future observations. That is lookahead.
-   Use an expanding/trailing window instead.
-2. **"Award Amount" is the current total obligation.** The award-level USAspending
-   endpoint returns the cumulative obligated amount *as of today*, including
-   modifications booked years after the award. Stamping that figure at the
-   original award date leaks the future into the past. The point-in-time-correct
-   source is the **transaction-level** feed (`action_date` + per-transaction
-   obligation).
-3. **`ts_available = period-of-performance start_date`** is the wrong timestamp.
-   Observed `start_date` values span **1984 → 2028** (verified) — PoP starts, not
-   "when the award became public." Awards are also reported to FPDS with a lag, so
-   the honest available-date is roughly `action_date + reporting_lag`.
-
-### Caveat B — the universe is too sparse to sort
-The feature store ended up with **100 rows across only 13 of 25 tickers** (12
-names — RTX, GD, BA, … — never matched), because the downloader pulls only the
-**top 100 awards by dollar amount per vendor** (`limit=100`, sorted desc) and the
-rolling-velocity step then thins it further. With ~5 populated names on a typical
-day, "quintiles" are degenerate (top bucket = 1 stock). You cannot run a
-cross-sectional quintile study on 5 names. Either widen the universe materially or
-switch to a time-series (per-name) signal test.
-
-> Note also that `build_contract_feature` uses **row-based** rolling windows
-> (`rolling_sum(window_size=90)` = 90 *award rows*, not 90 days) on a series with
-> only ~5–10 rows per name. The "90-day" / "2-year" windows do not mean what their
-> names say; they should be time-based (`rolling_*_by="ts_available"`).
-
-### Caveat C — overlapping windows inflate every significance stat
-Each trading day is treated as an independent "period," but a 120-day forward
-return computed daily overlaps its neighbor by 119/120. The ~600 "periods" are
-nowhere near 600 independent observations, so the annualized Sharpe and IC-IR are
-massively overstated (this is why momentum shows a fantasy Sharpe of 9.6).
-Sample at non-overlapping horizons, or apply a Newey–West / overlap correction.
-
-### Caveat D — multiple testing
-Three horizons × two features × (spread, IC, …) with no correction. Any "winner"
-here would need out-of-sample and significance adjustment before being believed.
+### Remaining limitations (now the *honest* ones, not bugs)
+- **Low statistical power.** Non-overlapping sampling on 3 years leaves 5–12
+  periods per horizon. The right next step is a longer history and/or a wider
+  universe, not more parameter tweaking.
+- **Reporting lag is a flat 30d assumption**; true FPDS lag varies.
+- **Multiple testing** across horizons/features is uncorrected — treat any single
+  cell as exploratory.
 
 ---
 
-## Part 5 — Recommendations for v2 (prioritized)
+## Part 3 — C++ engine rearchitecture
 
-1. **Fix the available-date and amount source** (Caveat A2/A3): pull
-   transaction-level obligations with `action_date`, add a reporting lag, and set
-   `ts_available` accordingly. This is the single biggest validity fix.
-2. **Trailing/expanding z-score** instead of full-sample (Caveat A1).
-3. **Time-based rolling windows** in the velocity calc (Caveat B note).
-4. **Widen the universe or switch to time-series tests** — 13 names can't be
-   quintile-sorted (Caveat B).
-5. **Non-overlapping or overlap-corrected stats** for Sharpe/IC-IR (Caveat C).
-6. Then, and only then, re-ask whether contract-award acceleration beats momentum.
+The engine compiled but its build was blocked and its outputs were wrong.
+
+- **Build:** `fmt` / `nlohmann_json` / `SQLite3` were `find_package(... REQUIRED)`
+  yet unused by any source (and `FindSQLite3` here exposes no usable target).
+  Removed; the engine now configures and builds with **zero external deps**.
+- **Metrics (`metrics.cpp`), rewritten from real accounting:**
+  - `daily_returns` was off-by-one and dropped the last day → corrupted
+    Sharpe/Sortino/vol. Now one clean close-to-close return per day.
+  - Sortino downside deviation divided by the *loser* count; now by total N.
+  - `win_rate` was ~always 0 and `profit_factor` hard-returned 999 (it treated a
+    sell *price* as profit). Both now derive from `realized_trade_pnls`, a FIFO
+    average-cost round-trip P&L. `winning/losing/total_trades` and
+    `avg_trade_pnl` likewise.
+- **Portfolio (`engine.cpp`):** realized P&L had the wrong sign on a full close
+  (profitable long exits booked as losses) and over-counted on flips; rewritten
+  with proper average-cost close/partial/flip handling. `buying_power` no longer
+  double-counts cash.
+- **Indicators:** RSI on a flat series returned 100 (dead both-zero branch); now
+  the neutral 50.
+- **Strategy (the big one):** `StrategyFunc` didn't receive the symbol, so the
+  momentum strategy updated *every* symbol's state on each bar and emitted
+  signals for instruments it never saw. `StrategyFunc` now takes `symbol`; the
+  strategy keeps clean per-symbol state. Buy-and-hold likewise sizes each name
+  off its own first bar.
+- **Tests tightened** (loose `>= 0` checks replaced with exact assertions):
+  36 cases / 82 assertions pass, including new round-trip-P&L, partial-close,
+  and flip tests. `qf-runner` on the sample data now reports real win rate /
+  profit factor / trade counts.
 
 ---
 
-## Files touched
-
-| File | Change |
-|------|--------|
-| `python/downloaders/ohlcv.py` | Browser UA + 429 retry/backoff (Bug 1) |
-| `studies/contract_award_velocity.py` | Accept normalized column names (Bug 2) |
-| `python/research/study_runner.py` | Drawdown `KeyError` (Bug 3), quintile sign (Bug 4), additive drawdown + labels (Bug 5) |
-| `.gitignore` | Ignore generated `data/features/` |
-
-Generated artifacts for this run live alongside this file in
-`reports/contract_award_velocity/{velocity,momentum_baseline}_{20,60,120}d/`.
-Reproduce with:
+## Reproduce
 
 ```bash
+# Python study (live data)
 python studies/contract_award_velocity.py --years 3 \
     --out reports/contract_award_velocity --horizons 20,60,120
+python -m pytest python/tests -q
+
+# C++ engine
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+./build/qf-tests
+./build/qf-runner --bars data/sample_bars.csv --strategy momentum_ema_hysteresis
 ```
+
+---
+
+---
+
+# Appendix — v1 notes (original audit)
+
+The first pass established that the flagship study had **never run** (three
+breaking bugs), then once forced to run produced **IC ≈ 0** for the contract
+feature alongside an inverted-sign spread and a −571,992% drawdown in the
+harness. Those findings motivated the v2 rearchitecture above; the specific v1
+bugs are folded into Part 1. The headline has survived the rebuild: the contract
+feature still shows no edge, but now that statement rests on PIT-clean data and
+honest, non-overlapping statistics rather than on broken plumbing.

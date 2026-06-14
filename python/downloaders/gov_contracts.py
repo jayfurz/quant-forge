@@ -153,6 +153,85 @@ def fetch_defense_contracts(
 fetch_defense_contracts_by_vendor = fetch_defense_contracts
 
 
+def fetch_transactions_by_vendor(
+    vendor_names: list[str],
+    start_date: str = "2023-01-01",
+    end_date: str = "2025-12-31",
+    max_pages: int = 20,
+    page_size: int = 100,
+) -> pl.DataFrame:
+    """
+    Fetch federal contract *transactions* (obligation actions) per vendor.
+
+    Unlike :func:`fetch_defense_contracts`, which hits the award-level endpoint
+    and returns each award's *current cumulative* obligated amount stamped at a
+    single period-of-performance start date (a lookahead trap — see
+    reports/contract_award_velocity/RESEARCH_NOTES.md), this hits the
+    transaction-level endpoint. Each row is one obligation booked on a specific
+    ``action_date``, which is the point-in-time-correct event timestamp for
+    building an award-velocity feature.
+
+    Results are paginated (the award-level call only ever saw the top 100 by
+    amount); we walk up to ``max_pages`` per vendor.
+
+    Returns columns:
+        vendor, recipient_name, award_id, amount, action_date, agency
+    """
+    url = f"{USA_SPENDING}/search/spending_by_transaction/"
+    rows = []
+
+    for vendor in vendor_names:
+        for page in range(1, max_pages + 1):
+            payload = {
+                "filters": {
+                    "keywords": [vendor],
+                    "time_period": [{"start_date": start_date, "end_date": end_date}],
+                    "award_type_codes": ["A", "B", "C", "D"],
+                },
+                "fields": [
+                    "Transaction Amount", "Action Date", "Recipient Name",
+                    "Award ID", "Awarding Agency", "Mod",
+                ],
+                "limit": page_size,
+                "page": page,
+                "sort": "Action Date",
+                "order": "desc",
+            }
+            try:
+                resp = requests.post(url, json=payload, headers=HEADERS, timeout=30)
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                logger.error("Transaction search failed for '%s' (page %d): %s",
+                             vendor, page, e)
+                break
+
+            results = data.get("results", [])
+            for tx in results:
+                try:
+                    amount = float(tx.get("Transaction Amount", 0) or 0)
+                except (ValueError, TypeError):
+                    amount = 0.0
+                rows.append({
+                    "vendor": vendor,
+                    "recipient_name": tx.get("Recipient Name", ""),
+                    "award_id": tx.get("Award ID", ""),
+                    "amount": amount,
+                    "action_date": tx.get("Action Date"),
+                    "agency": tx.get("Awarding Agency", ""),
+                })
+
+            if not data.get("page_metadata", {}).get("hasNext"):
+                break
+            time.sleep(0.3)
+        time.sleep(0.5)
+
+    if not rows:
+        return pl.DataFrame()
+
+    return pl.DataFrame(rows).sort(["vendor", "action_date"])
+
+
 def contract_award_velocity(
     df: pl.DataFrame,
     group_by: str = "vendor",
